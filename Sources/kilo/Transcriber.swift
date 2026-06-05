@@ -7,11 +7,12 @@ enum TranscriberError: Error {
     case noAudioFormat
 }
 
-/// SpeechAnalyzer + SpeechTranscriber 的 CLI 包裝。
+/// SpeechAnalyzer + SpeechTranscriber 的包裝，辨識結果寫進 CaptionModel。
 /// 串接參考 FluidInference/swift-scribe（iOS26/macOS26 實作）。
 @MainActor
 final class Transcriber {
     private let locale: Locale
+    private let captions: CaptionModel
     private var transcriber: SpeechTranscriber?
     private var analyzer: SpeechAnalyzer?
     private var analyzerFormat: AVAudioFormat?
@@ -20,8 +21,9 @@ final class Transcriber {
     private var resultsTask: Task<Void, Never>?
     private let converter = BufferConverter()
 
-    init(locale: Locale) {
+    init(locale: Locale, captions: CaptionModel) {
         self.locale = locale
+        self.captions = captions
         let (stream, continuation) = AsyncStream<AnalyzerInput>.makeStream()
         self.inputSequence = stream
         self.inputBuilder = continuation
@@ -41,15 +43,15 @@ final class Transcriber {
         self.analyzerFormat = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber])
         guard analyzerFormat != nil else { throw TranscriberError.noAudioFormat }
 
-        // 持續消費辨識結果：volatile 灰字單行覆蓋、final 白字定稿換行
+        let captions = self.captions
         resultsTask = Task {
             do {
                 for try await case let result in transcriber.results {
                     let text = String(result.text.characters)
                     if result.isFinal {
-                        Self.printFinal(text)
+                        captions.commitFinal(text)
                     } else {
-                        Self.printVolatile(text)
+                        captions.setVolatile(text)
                     }
                 }
             } catch {
@@ -71,15 +73,6 @@ final class Transcriber {
         try await analyzer?.finalizeAndFinishThroughEndOfInput()
         resultsTask?.cancel()
         resultsTask = nil
-    }
-
-    // ANSI：[2K 清行 + \r 回行首；volatile 灰(90m)、final 還原(0m)
-    nonisolated private static func printVolatile(_ t: String) {
-        print("\r\u{1B}[2K\u{1B}[90m\(t)\u{1B}[0m", terminator: "")
-        fflush(stdout)
-    }
-    nonisolated private static func printFinal(_ t: String) {
-        print("\r\u{1B}[2K\u{1B}[0m\(t)")
     }
 }
 
