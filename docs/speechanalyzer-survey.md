@@ -94,12 +94,14 @@ let transcriber = SpeechTranscriber(locale: locale, preset: .offlineTranscriptio
 let transcriber = SpeechTranscriber(
     locale: locale,
     transcriptionOptions: [],
-    reportingOptions: [.volatileResults],   // 邊說邊吐暫定結果
+    reportingOptions: [.volatileResults, .fastResults],   // volatile=邊說邊吐；fastResults=偏即時
     attributeOptions:  [.audioTimeRange]    // 每段附 timestamp
 )
 
 let analyzer = SpeechAnalyzer(modules: [transcriber])
 ```
+
+> ⚠️ **即時性雷**：只設 `.volatileResults` 時 analyzer 偏準確度、**會累積整段語音才一次吐 volatile**（實測：說完才在 0.06 秒內暴吐 41 字，UI 上就是「說完很久才一次全顯示」）。加 `.fastResults` 才邊說邊逐段出。另外把音訊源頭壓到 16k mono（省 48k→16k 重採樣）、開場 `SpeechAnalyzer.prepareToAnalyze(in:)` 預熱 ANE，都能再降延遲。`AnalyzerInput` 的 `bufferStartTime` 是給離線 replay 的，即時串流不需要、也不是延遲主因。
 
 ### 3.3 確保模型 asset 已下載
 
