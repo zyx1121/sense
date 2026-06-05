@@ -27,8 +27,8 @@ final class SystemAudioSource: NSObject, AudioSource, SCStreamOutput, SCStreamDe
         let config = SCStreamConfiguration()
         config.capturesAudio = true
         config.excludesCurrentProcessAudio = true  // 不錄自己，避免回授
-        config.sampleRate = 48_000
-        config.channelCount = 2
+        config.sampleRate = 16_000  // 源頭直接要 16k mono，省掉 48k→16k 重採樣
+        config.channelCount = 1
         config.width = 2                            // 只要音訊，畫面降到最小省資源
         config.height = 2
         config.showsCursor = false
