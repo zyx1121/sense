@@ -1,24 +1,48 @@
 import Foundation
 import Speech
 
-// kilo M1a — 探測 SpeechTranscriber 語言支援，先把「繁中能不能用」這個最大風險驗掉。
-// 純查詢、免任何權限。M1b 再接 ScreenCaptureKit 系統音訊 → SpeechAnalyzer 串流轉錄。
-
-let supported = Array(await SpeechTranscriber.supportedLocales)
-let installed = Array(await SpeechTranscriber.installedLocales)
-
-func dump(_ title: String, _ locales: [Locale]) {
-    print("=== \(title) (\(locales.count)) ===")
-    for id in locales.map({ $0.identifier }).sorted() { print("  \(id)") }
+// M1a：--locales 探測語言支援（保留，免權限）
+func dumpLocales() async {
+    let supported = Array(await SpeechTranscriber.supportedLocales)
+    let installed = Array(await SpeechTranscriber.installedLocales)
+    func dump(_ title: String, _ ls: [Locale]) {
+        print("=== \(title) (\(ls.count)) ===")
+        for id in ls.map({ $0.identifier }).sorted() { print("  \(id)") }
+    }
+    dump("supportedLocales", supported)
+    dump("installedLocales", installed)
 }
 
-dump("supportedLocales", supported)
-dump("installedLocales", installed)
+func log(_ s: String) { FileHandle.standardError.write(Data((s + "\n").utf8)) }
 
-let ids = supported.map { $0.identifier.lowercased() }
-func has(_ pred: (String) -> Bool) -> Bool { ids.contains(where: pred) }
+if CommandLine.arguments.contains("--locales") {
+    await dumpLocales()
+    exit(0)
+}
 
-print("---")
-print("繁中 zh-Hant/zh-TW : \(has { $0.contains("hant") || $0.contains("_tw") } ? "✅ 有" : "❌ 無")")
-print("簡中 zh-Hans/zh-CN : \(has { $0.contains("hans") || $0.contains("_cn") } ? "✅ 有" : "❌ 無")")
-print("任何中文 zh*       : \(has { $0.hasPrefix("zh") } ? "✅ 有" : "❌ 無")")
+// M1b：系統音訊 (ScreenCaptureKit) → SpeechAnalyzer(zh-TW) → console 字幕
+let transcriber = Transcriber(locale: Locale(identifier: "zh-TW"))
+let source = SystemAudioSource()
+
+log("kilo — 系統音訊即時字幕 (zh-TW)。Ctrl-C 結束。")
+
+// Ctrl-C 優雅收尾（global queue，不依賴 main runloop）
+signal(SIGINT, SIG_IGN)
+let sigint = DispatchSource.makeSignalSource(signal: SIGINT, queue: .global())
+sigint.setEventHandler {
+    Task { await source.stop(); try? await transcriber.finish() }
+}
+sigint.resume()
+
+do {
+    try await transcriber.setUp()
+    let audio = try await source.start()
+    log("聽取中…")
+    for await buffer in audio {
+        try await transcriber.stream(buffer)
+    }
+    log("結束。")
+} catch {
+    log("error: \(error)")
+    exit(1)
+}
