@@ -24,6 +24,8 @@
 	<true/>
 	<key>LSUIElement</key>
 	<true/>
+	<key>NSScreenCaptureUsageDescription</key>
+	<string>Kilo 需要螢幕錄製權限來擷取系統音訊（你正在聽的影片 / 通話）做即時轉錄。</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Kilo 需要麥克風來即時轉錄你聽到的對話。</string>
 </dict>
