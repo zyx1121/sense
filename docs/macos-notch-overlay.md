@@ -112,6 +112,7 @@ app.run()
 4. **不搶焦點**：`.nonactivatingPanel` + `orderFrontRegardless()` 讓前景 app 不被打斷；要內容可互動才加 `canBecomeKey = true`。
 5. **無瀏海 Mac / 外接螢幕**：`notchFrame` 回 `nil`，用 `?? 300`（寬）+ `menubarHeight`（高）兜，別讓它 crash。
 6. **多螢幕**：`NSScreen.main` 是「目前 key window 所在螢幕」不一定是內建瀏海螢幕；要鎖內建螢幕得自己挑 `screens` 裡 `notchFrame != nil` 那台。
+7. **`NSHostingView` 要撐滿 panel**：borderless panel 的 `contentView` 設成 `NSHostingView` 後，必須 `hosting.frame = NSRect(origin: .zero, size: rect.size)` + `hosting.autoresizingMask = [.width, .height]`，否則 SwiftUI 的 `.frame(maxHeight: .infinity)` / `alignment` 全失效，內容卡在 view 的 intrinsic 位置（實測：字幕黏在選單列高度而非瀏海正下方，盯著截圖調半天才發現是這個）。
 
 ---
 
