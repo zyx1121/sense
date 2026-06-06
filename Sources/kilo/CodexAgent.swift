@@ -2,6 +2,7 @@ import Foundation
 
 /// codex exec --json 吐出的事件，餵 UI 即時顯示。
 enum CodexEvent: Sendable {
+    case thread(String)                                                // session id，下輪 resume 用
     case step(id: String, title: String, running: Bool, failed: Bool)  // tool / exec 步驟
     case message(String)                                               // agent 一則完整回覆
 }
@@ -9,33 +10,47 @@ enum CodexEvent: Sendable {
 /// codex exec 當 agent engine：workspace-write 圈在 workdir、小 model + minimal reasoning 求快。
 /// - 用 `/bin/zsh -lc` 跑：codex 在 fnm shim，GUI subprocess 的 PATH 看不到，login shell 才載得到。
 /// - 帶 CODEX_API_KEY（從 Keychain）：避開 ChatGPT 登入的 rate-limit。
-/// - 指令走 env（不拼進命令字串避免 injection）；逐字稿走 stdin（codex 接成 `<stdin>` block）。
+/// - prompt（指令 + 逐字稿）整包走 env，不拼進命令字串避免 injection。
+///   不用 stdin：`exec resume` 模式 stdin 不會接進 prompt（實測 codex-cli 0.136），統一走 env。
 /// - `--json`：stdout 每行一個 JSONL event（item.started/completed、turn.*），邊到邊 parse 邊 yield。
+/// - history：`thread.started` 的 id 由呼叫端記下，下輪 `exec resume <id>` 續同一個 session；
+///   resume 不收 `-s`/`-C`，sandbox 與 workdir 從原 session 繼承。
 struct CodexAgent: Sendable {
     let workdir: String
     let apiKey: String?
     var model = "gpt-5.4-mini"
 
-    func stream(instruction: String, transcript: String) -> AsyncThrowingStream<CodexEvent, Error> {
+    func stream(instruction: String, transcript: String,
+                resume threadID: String? = nil) -> AsyncThrowingStream<CodexEvent, Error> {
         let (events, cont) = AsyncThrowingStream<CodexEvent, Error>.makeStream()
-        let cmd = """
-            codex exec --json -C '\(workdir)' --skip-git-repo-check \
-            -s workspace-write -m \(model) \
-            -c model_reasoning_effort=low -c approval_policy=never "$KILO_INSTRUCTION"
-            """
+
+        // 逐字稿包進 prompt（resume 時 codex 記得舊的，但新語音只在這份 tail 裡）
+        let prompt = transcript.isEmpty
+            ? instruction
+            : "\(instruction)\n\n（最新逐字稿片段，可能與前次部分重疊）\n\(transcript)"
+
+        let common = "-m \(model) -c model_reasoning_effort=low -c approval_policy=never"
+        let cmd: String
+        if let threadID {
+            cmd = "codex exec resume '\(threadID)' --json --skip-git-repo-check \(common) \"$KILO_PROMPT\""
+        } else {
+            cmd = """
+                codex exec --json -C '\(workdir)' --skip-git-repo-check \
+                -s workspace-write \(common) "$KILO_PROMPT"
+                """
+        }
 
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/bin/zsh")
         proc.arguments = ["-lc", cmd]
         var env = ProcessInfo.processInfo.environment
-        env["KILO_INSTRUCTION"] = instruction
+        env["KILO_PROMPT"] = prompt
         if let apiKey { env["CODEX_API_KEY"] = apiKey }
         proc.environment = env
 
-        let stdin = Pipe()
         let stdout = Pipe()
         let stderr = Pipe()
-        proc.standardInput = stdin
+        proc.standardInput = FileHandle.nullDevice
         proc.standardOutput = stdout
         proc.standardError = stderr
 
@@ -49,8 +64,6 @@ struct CodexAgent: Sendable {
         Task {
             do {
                 try proc.run()
-                stdin.fileHandleForWriting.write(Data(transcript.utf8))
-                try? stdin.fileHandleForWriting.close()
             } catch {
                 cont.finish(throwing: error)
                 return
@@ -91,6 +104,11 @@ struct CodexAgent: Sendable {
               let type = obj["type"] as? String else { return [] }
 
         switch type {
+        case "thread.started":
+            // UUID 字元集檢查：id 會被拼進下輪 resume 命令，不吃奇怪輸出
+            guard let id = obj["thread_id"] as? String,
+                  !id.isEmpty, id.allSatisfy({ $0.isHexDigit || $0 == "-" }) else { return [] }
+            return [.thread(id)]
         case "item.started", "item.updated", "item.completed":
             guard let item = obj["item"] as? [String: Any],
                   let itemType = item["type"] as? String,
@@ -124,14 +142,14 @@ struct CodexAgent: Sendable {
             let msg = ((obj["error"] as? [String: Any])?["message"] as? String) ?? "turn failed"
             return [.message("⚠️ \(msg)")]
         default:
-            return []  // thread.started / turn.started / turn.completed
+            return []  // turn.started / turn.completed
         }
     }
 
     /// codex 的 command 多包一層 `/bin/zsh -lc '…'`，顯示時剝掉。
     private static func prettyCommand(_ raw: String) -> String {
         var s = raw
-        for prefix in ["/bin/zsh -lc ", "/bin/bash -lc ", "zsh -lc ", "bash -lc ", "sh -c "]
+        for prefix in ["/bin/zsh -lc ", "/bin/bash -lc ", "zsh -lc ", "bash -lc ", "sh -c ", "/bin/zsh -c ", "/bin/bash -c "]
         where s.hasPrefix(prefix) {
             s = String(s.dropFirst(prefix.count))
             break

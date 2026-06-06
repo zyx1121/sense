@@ -1,12 +1,14 @@
 import Foundation
 
 /// overlay input → codex agent。逐字稿存在 TranscriptStore（也是 codex 的 context）。
+/// 對話 history：記住 codex 的 thread id，每輪 `exec resume` 續同一個 session。
 @MainActor
 final class AgentController {
     private let store: TranscriptStore
     private let agent: CodexAgent?
     private let metrics: MetricsStore
     private let polisher: TranscriptPolisher
+    private var threadID: String?  // codex session，app 重啟歸零
 
     init(store: TranscriptStore, agent: CodexAgent?, metrics: MetricsStore, polisher: TranscriptPolisher) {
         self.store = store
@@ -38,29 +40,51 @@ final class AgentController {
         }
         store.setThinking(true)
         let transcript = store.context
-        let store = self.store
-        let metrics = self.metrics
         Task {
             let start = Date()
-            var failed = false
-            var gotMessage = false
-            do {
-                for try await ev in agent.stream(instruction: instruction, transcript: transcript) {
-                    switch ev {
-                    case .step(let id, let title, let running, let f):
-                        store.upsertStep(id: id, title: title, running: running, failed: f)
-                    case .message(let text):
-                        gotMessage = true
-                        store.appendReply(text)
-                    }
-                }
-                if !gotMessage { store.appendError("codex 沒回應") }
-            } catch {
-                failed = true
-                store.appendError(error.localizedDescription)
+            var result = await runTurn(agent, instruction: instruction,
+                                       transcript: transcript, resume: threadID)
+
+            // resume 失敗（session 被 GC / 重開機後不存在）且還沒有任何回覆 → 重開新 session 再試一次
+            if result.error != nil, threadID != nil, !result.gotMessage {
+                threadID = nil
+                store.upsertStep(id: "resume-retry", title: "session 失效，重開新對話",
+                                 running: false, failed: false)
+                result = await runTurn(agent, instruction: instruction,
+                                       transcript: transcript, resume: nil)
             }
-            metrics.recordCodex(latency: Date().timeIntervalSince(start), failed: failed)
+
+            if let error = result.error {
+                store.appendError(error.localizedDescription)
+            } else if !result.gotMessage {
+                store.appendError("codex 沒回應")
+            }
+            metrics.recordCodex(latency: Date().timeIntervalSince(start),
+                                failed: result.error != nil)
             store.setThinking(false)
+        }
+    }
+
+    /// 跑一輪 codex turn，事件直灌 feed；回傳是否收到回覆與錯誤。
+    private func runTurn(_ agent: CodexAgent, instruction: String, transcript: String,
+                         resume: String?) async -> (gotMessage: Bool, error: Error?) {
+        var got = false
+        do {
+            for try await ev in agent.stream(instruction: instruction,
+                                             transcript: transcript, resume: resume) {
+                switch ev {
+                case .thread(let id):
+                    threadID = id
+                case .step(let id, let title, let running, let failed):
+                    store.upsertStep(id: id, title: title, running: running, failed: failed)
+                case .message(let text):
+                    got = true
+                    store.appendReply(text)
+                }
+            }
+            return (got, nil)
+        } catch {
+            return (got, error)
         }
     }
 }
