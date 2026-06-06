@@ -73,8 +73,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.summarizer = summarizer
         let metrics = self.metrics
 
+        // 辨識語言：--lang en-US 等；預設 zh-TW。zh-TW model 辨識英文很差，看英文內容要切 en-US。
+        let args = CommandLine.arguments
+        let lang = args.firstIndex(of: "--lang").flatMap { args.indices.contains($0 + 1) ? args[$0 + 1] : nil } ?? "zh-TW"
+        logErr("辨識語言：\(lang)")
+
         let transcriber = Transcriber(
-            locale: Locale(identifier: "zh-TW"), captions: captions,
+            locale: Locale(identifier: lang), captions: captions,
             onFinal: { text in
                 summarizer.feed(text)
                 metrics.recordFinal(chars: text.count)
