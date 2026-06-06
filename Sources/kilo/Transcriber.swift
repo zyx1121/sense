@@ -7,12 +7,13 @@ enum TranscriberError: Error {
     case noAudioFormat
 }
 
-/// SpeechAnalyzer + SpeechTranscriber 的包裝，辨識結果寫進 CaptionModel。
-/// 串接參考 FluidInference/swift-scribe（iOS26/macOS26 實作）。
+/// SpeechAnalyzer + SpeechTranscriber 包裝：volatile 進 CaptionModel；
+/// 每段 final 同時餵 onFinal（給 Summarizer）。串接參考 swift-scribe。
 @MainActor
 final class Transcriber {
     private let locale: Locale
     private let captions: CaptionModel
+    private let onFinal: (@MainActor (String) -> Void)?
     private var transcriber: SpeechTranscriber?
     private var analyzer: SpeechAnalyzer?
     private var analyzerFormat: AVAudioFormat?
@@ -21,9 +22,10 @@ final class Transcriber {
     private var resultsTask: Task<Void, Never>?
     private let converter = BufferConverter()
 
-    init(locale: Locale, captions: CaptionModel) {
+    init(locale: Locale, captions: CaptionModel, onFinal: (@MainActor (String) -> Void)? = nil) {
         self.locale = locale
         self.captions = captions
+        self.onFinal = onFinal
         let (stream, continuation) = AsyncStream<AnalyzerInput>.makeStream()
         self.inputSequence = stream
         self.inputBuilder = continuation
@@ -33,7 +35,7 @@ final class Transcriber {
         let transcriber = SpeechTranscriber(
             locale: locale,
             transcriptionOptions: [],
-            reportingOptions: [.volatileResults, .fastResults],  // fastResults：偏即時、不等累積到穩
+            reportingOptions: [.volatileResults, .fastResults],  // fastResults：偏即時
             attributeOptions: [.audioTimeRange])
         self.transcriber = transcriber
         let analyzer = SpeechAnalyzer(modules: [transcriber])
@@ -44,15 +46,17 @@ final class Transcriber {
         let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber])
         self.analyzerFormat = format
         guard let format else { throw TranscriberError.noAudioFormat }
-        try await analyzer.prepareToAnalyze(in: format)  // ANE 預熱，避免首段冷啟動慢
+        try await analyzer.prepareToAnalyze(in: format)  // ANE 預熱
 
         let captions = self.captions
+        let onFinal = self.onFinal
         resultsTask = Task {
             do {
                 for try await case let result in transcriber.results {
                     let text = String(result.text.characters)
                     if result.isFinal {
                         captions.commitFinal(text)
+                        onFinal?(text)               // 餵 Summarizer（只送定稿）
                     } else {
                         captions.setVolatile(text)
                     }
