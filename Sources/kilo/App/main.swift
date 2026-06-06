@@ -26,7 +26,7 @@ if CommandLine.arguments.contains("--locales") {
     exit(0)
 }
 
-// 系統音訊 → 瀏海字幕 + 分段逐字稿 overlay + Kilo agent（codex）
+// 系統音訊 → 瀏海字幕 + 連續逐字稿（小模型即時整理）；shake 圈選畫面 + codex agent 分析
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let captions = CaptionModel()

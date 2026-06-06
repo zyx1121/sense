@@ -163,7 +163,7 @@ struct TranscriptView: View {
             NSWorkspace.shared.open(URL(fileURLWithPath: hit))
             return .handled
         }
-        Telemetry.summary.error("feed link not found: \(raw, privacy: .public)")
+        Telemetry.agent.error("feed link not found: \(raw, privacy: .public)")
         return .discarded  // 找不到就吞掉，不彈 -50 dialog
     }
 
