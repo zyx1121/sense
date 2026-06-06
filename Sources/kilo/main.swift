@@ -37,11 +37,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var panel: NotchPanel?
     private var summaryWindow: SummaryWindow?
     private var agentController: AgentController?
+    private var shakeCapture: ShakeCapture?
 
     func applicationDidFinishLaunching(_: Notification) {
         showOverlay()
         showSummaryWindow()
+        startShakeCapture()
         startPipeline()
+    }
+
+    /// 晃游標 → 圈選畫面元素給 Kilo 看（dim + spotlight + click capture）。
+    private func startShakeCapture() {
+        let shake = ShakeCapture(store: transcript)
+        shake.onSelectingChange = { [weak self] on in
+            self?.summaryWindow?.setElevated(on)
+        }
+        shake.passThroughFrame = { [weak self] in
+            self?.summaryWindow?.cgFrame ?? .zero
+        }
+        shake.start()
+        shakeCapture = shake
     }
 
     private func showOverlay() {

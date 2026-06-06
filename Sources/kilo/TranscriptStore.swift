@@ -92,6 +92,9 @@ final class TranscriptStore {
     private var replyTask: Task<Void, Never>?
     private var stepSeq = 0
 
+    /// shake 圈選收進來、等下一輪 codex 帶上的素材。
+    private(set) var attachments: [Asset] = []
+
     var transcriptLength: Int { polished.count + pendingRaw.count + volatileShown.count }
     var transcriptEmpty: Bool { polished.isEmpty && pendingRaw.isEmpty && volatileShown.isEmpty }
 
@@ -178,6 +181,12 @@ final class TranscriptStore {
     }
 
     func setThinking(_ b: Bool) { thinking = b }
+
+    // MARK: - Attachments（shake 圈選素材）
+
+    func addAttachment(_ a: Asset) { attachments.append(a) }
+    func removeAttachment(_ a: Asset) { attachments.removeAll { $0.id == a.id } }
+    func clearAttachments() { attachments.removeAll() }
 
     /// 歷史上限：太舊的步驟從頭丟（記憶體安全閥，捲回去看得到的範圍內夠用）。
     private func trimFeed() {

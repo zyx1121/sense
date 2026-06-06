@@ -30,6 +30,21 @@ final class SummaryWindow {
     }
 
     func show() { panel.orderFrontRegardless() }
+
+    /// shake 選取模式時抬到 dim（.screenSaver）之上，結束降回 floating。
+    func setElevated(_ on: Bool) {
+        panel.level = on
+            ? NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 1)
+            : .floating
+    }
+
+    /// 視窗的 CG 座標 frame（給 ClickInterceptor 放行用）。
+    var cgFrame: CGRect {
+        let f = panel.frame
+        let primaryH = (NSScreen.screens.first(where: { $0.frame.origin == .zero })
+            ?? NSScreen.main)?.frame.height ?? 0
+        return CGRect(x: f.origin.x, y: primaryH - f.maxY, width: f.width, height: f.height)
+    }
 }
 
 struct TranscriptView: View {
@@ -93,6 +108,19 @@ struct TranscriptView: View {
                     .onChange(of: store.feedLength) { _, _ in
                         proxy.scrollTo("feedBottom", anchor: .bottom)
                     }
+                }
+                .background(.white.opacity(0.04))
+            }
+
+            // shake 圈選素材 chips（送出時消耗）
+            if !store.attachments.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(store.attachments) { asset in
+                            attachmentChip(asset)
+                        }
+                    }
+                    .padding(.horizontal, 14).padding(.vertical, 7)
                 }
                 .background(.white.opacity(0.04))
             }
@@ -188,6 +216,36 @@ struct TranscriptView: View {
             Text("⚠️ \(step.text)")
                 .font(.system(size: 11)).foregroundStyle(.orange.opacity(0.9))
         }
+    }
+
+    /// 圈選素材小卡：截圖縮圖 / 文字摘要 + 移除鈕。
+    @ViewBuilder
+    private func attachmentChip(_ asset: Asset) -> some View {
+        HStack(spacing: 5) {
+            switch asset.kind {
+            case .image(let img):
+                Image(nsImage: img)
+                    .resizable().aspectRatio(contentMode: .fill)
+                    .frame(width: 30, height: 30)
+                    .clipShape(.rect(cornerRadius: 5))
+            case .text(let s):
+                Image(systemName: "text.quote")
+                    .font(.system(size: 10)).foregroundStyle(.white.opacity(0.6))
+                Text(s.replacingOccurrences(of: "\n", with: " ").prefix(14))
+                    .font(.system(size: 10)).foregroundStyle(.white.opacity(0.7))
+                    .lineLimit(1)
+            }
+            Button {
+                store.removeAttachment(asset)
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 10)).foregroundStyle(.white.opacity(0.45))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(4)
+        .background(.white.opacity(0.07), in: .rect(cornerRadius: 7))
+        .help(asset.source)
     }
 
     private func copyText(_ s: String) {

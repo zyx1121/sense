@@ -21,7 +21,8 @@ struct CodexAgent: Sendable {
     var model = "gpt-5.4-mini"
 
     func stream(instruction: String, transcript: String,
-                resume threadID: String? = nil) -> AsyncThrowingStream<CodexEvent, Error> {
+                resume threadID: String? = nil,
+                images: [String] = []) -> AsyncThrowingStream<CodexEvent, Error> {
         let (events, cont) = AsyncThrowingStream<CodexEvent, Error>.makeStream()
 
         // 逐字稿包進 prompt（resume 時 codex 記得舊的，但新語音只在這份 tail 裡）
@@ -29,7 +30,9 @@ struct CodexAgent: Sendable {
             ? instruction
             : "\(instruction)\n\n（最新逐字稿片段，可能與前次部分重疊）\n\(transcript)"
 
-        let common = "-m \(model) -c model_reasoning_effort=low -c approval_policy=never"
+        // 截圖走 -i（fresh / resume 都收）；path 是自家產的 ~/.kilo/captures/*.png，單引號包安全
+        let imageFlags = images.map { "-i '\($0)'" }.joined(separator: " ")
+        let common = "\(imageFlags) -m \(model) -c model_reasoning_effort=low -c approval_policy=never"
         let cmd: String
         if let threadID {
             cmd = "codex exec resume '\(threadID)' --json --skip-git-repo-check \(common) \"$KILO_PROMPT\""
