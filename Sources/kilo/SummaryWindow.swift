@@ -66,15 +66,24 @@ struct TranscriptView: View {
                 .padding(.bottom, 6)
             }
 
-            // Kilo feed：指令 + tool 步驟 + 淺藍打字機回應
+            // Kilo feed：跨 turn 歷史保留，自動跟到最新、可往回捲
             if !store.feed.isEmpty {
-                VStack(alignment: .leading, spacing: 5) {
-                    ForEach(store.feed.suffix(8)) { step in
-                        stepRow(step)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 5) {
+                            ForEach(store.feed) { step in
+                                stepRow(step)
+                            }
+                            Color.clear.frame(height: 1).id("feedBottom")
+                        }
+                        .padding(.horizontal, 16).padding(.vertical, 8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(maxHeight: 280)  // 內容少照內容高，多了封頂開捲
+                    .onChange(of: store.feedLength) { _, _ in
+                        proxy.scrollTo("feedBottom", anchor: .bottom)
                     }
                 }
-                .padding(.horizontal, 16).padding(.vertical, 8)
-                .frame(maxWidth: .infinity, alignment: .leading)
                 .background(.white.opacity(0.04))
             }
 
@@ -113,9 +122,15 @@ struct TranscriptView: View {
     private func stepRow(_ step: AgentStep) -> some View {
         switch step.kind {
         case .user:
-            Text("❯ \(step.text)")
-                .font(.system(size: 11)).foregroundStyle(.white.opacity(0.5))
-                .lineLimit(2)
+            // 跟輸入框同款 sparkle，視覺上一條指令一個段落
+            HStack(spacing: 8) {
+                Image(systemName: "sparkle")
+                    .font(.system(size: 11)).foregroundStyle(.white.opacity(0.4))
+                Text(step.text)
+                    .font(.system(size: 12)).foregroundStyle(.white.opacity(0.55))
+                    .lineLimit(2)
+            }
+            .padding(.top, 4)
         case .tool:
             HStack(spacing: 6) {
                 if step.running {
@@ -131,12 +146,21 @@ struct TranscriptView: View {
                     .lineLimit(1)
             }
         case .reply:
-            Text(step.shown)
+            Text(prefix(step.rendered, step.shownChars))
                 .font(.system(size: 12)).foregroundStyle(.cyan.opacity(0.9))
+                .lineSpacing(2.5)
                 .frame(maxWidth: .infinity, alignment: .leading)
         case .error:
             Text("⚠️ \(step.text)")
                 .font(.system(size: 11)).foregroundStyle(.orange.opacity(0.9))
         }
+    }
+
+    /// AttributedString 前 n 個字元（打字機切片，樣式跟著走）。
+    private func prefix(_ a: AttributedString, _ n: Int) -> AttributedString {
+        let chars = a.characters
+        guard n < chars.count else { return a }
+        let end = chars.index(chars.startIndex, offsetBy: n)
+        return AttributedString(a[a.startIndex..<end])
     }
 }

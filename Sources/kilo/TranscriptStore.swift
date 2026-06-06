@@ -5,10 +5,30 @@ struct AgentStep: Identifiable, Equatable {
     enum Kind: Equatable { case user, tool, reply, error }
     let id: String
     let kind: Kind
-    var text: String       // 全文（tool = title）
-    var shown: String      // reply 打字機已顯示的前綴；其他 kind == text
-    var running = false    // tool 進行中
-    var failed = false     // tool exit != 0
+    var text: String                 // raw 全文（tool = title）
+    var rendered: AttributedString   // reply: markdown 解析後；其他 = 原文
+    var shownChars: Int              // reply 打字機已顯示字元數；其他 = 全長
+    var running = false              // tool 進行中
+    var failed = false               // tool exit != 0
+
+    init(id: String, kind: Kind, text: String, revealed: Bool, running: Bool = false, failed: Bool = false) {
+        self.id = id
+        self.kind = kind
+        self.text = text
+        self.rendered = kind == .reply ? renderMarkdown(text) : AttributedString(text)
+        self.shownChars = revealed ? self.rendered.characters.count : 0
+        self.running = running
+        self.failed = failed
+    }
+}
+
+/// reply 的 markdown → AttributedString（inline only：bold / italic / code，保留換行）。
+/// 解析放 append 時做一次，打字機切「解析後」的前綴 — streaming 中不會先閃裸 `**` 再變粗體。
+private func renderMarkdown(_ s: String) -> AttributedString {
+    (try? AttributedString(
+        markdown: s,
+        options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
+        ?? AttributedString(s)
 }
 
 /// 接合兩段文字：兩側都是 ASCII 字母/數字才補空格（英文），CJK 直接相連。
@@ -83,44 +103,57 @@ final class TranscriptStore {
 
     // MARK: - Kilo feed
 
-    /// 新 turn：清掉上一輪步驟，指令當第一個 step。
+    /// feed 內容長度（含打字機進度），view 拿來觸發 auto-scroll。
+    var feedLength: Int { feed.reduce(feed.count) { $0 + $1.shownChars } }
+
+    /// 新 turn：指令追加進 feed（歷史保留，可往回捲），不清舊步驟。
     func beginTurn(_ instruction: String) {
-        replyTask?.cancel(); replyTask = nil
         stepSeq += 1
-        feed = [AgentStep(id: "user-\(stepSeq)", kind: .user, text: instruction, shown: instruction)]
+        feed.append(AgentStep(id: "user-\(stepSeq)", kind: .user, text: instruction, revealed: true))
+        trimFeed()
     }
 
     /// tool 步驟進度：同 id 更新（in_progress → completed），新 id 追加。
     func upsertStep(id: String, title: String, running: Bool, failed: Bool) {
         if let i = feed.firstIndex(where: { $0.id == id }) {
-            feed[i].text = title; feed[i].shown = title
+            feed[i].text = title
+            feed[i].rendered = AttributedString(title)
+            feed[i].shownChars = title.count
             feed[i].running = running; feed[i].failed = failed
         } else {
-            feed.append(AgentStep(id: id, kind: .tool, text: title, shown: title,
+            feed.append(AgentStep(id: id, kind: .tool, text: title, revealed: true,
                                   running: running, failed: failed))
         }
     }
 
     func appendReply(_ text: String) {
         stepSeq += 1
-        feed.append(AgentStep(id: "reply-\(stepSeq)", kind: .reply, text: text, shown: ""))
+        feed.append(AgentStep(id: "reply-\(stepSeq)", kind: .reply, text: text, revealed: false))
+        trimFeed()
         pumpReply()
     }
 
     func appendError(_ text: String) {
         stepSeq += 1
-        feed.append(AgentStep(id: "err-\(stepSeq)", kind: .error, text: text, shown: text))
+        feed.append(AgentStep(id: "err-\(stepSeq)", kind: .error, text: text, revealed: true))
     }
 
     func setThinking(_ b: Bool) { thinking = b }
 
-    /// 打字機：依序把 reply step 的 shown 推進到全文（10ms/字）。
+    /// 歷史上限：太舊的步驟從頭丟（記憶體安全閥，捲回去看得到的範圍內夠用）。
+    private func trimFeed() {
+        if feed.count > 120 { feed.removeFirst(feed.count - 120) }
+    }
+
+    /// 打字機：依序把 reply step 的 shownChars 推進到全長（10ms/字）。
     private func pumpReply() {
         guard replyTask == nil else { return }
         replyTask = Task { [weak self] in
             while let self, !Task.isCancelled {
-                guard let i = feed.firstIndex(where: { $0.kind == .reply && $0.shown != $0.text }) else { break }
-                feed[i].shown = String(feed[i].text.prefix(feed[i].shown.count + 1))
+                guard let i = feed.firstIndex(where: {
+                    $0.kind == .reply && $0.shownChars < $0.rendered.characters.count
+                }) else { break }
+                feed[i].shownChars += 1
                 try? await Task.sleep(for: .milliseconds(10))
             }
             self?.replyTask = nil
