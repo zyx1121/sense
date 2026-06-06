@@ -23,17 +23,16 @@ if CommandLine.arguments.contains("--locales") {
     exit(0)
 }
 
-// 系統音訊 → SpeechAnalyzer → 瀏海字幕 + Kilo agent（codex）overlay
+// 系統音訊 → 瀏海字幕 + 分段逐字稿 overlay + Kilo agent（codex）
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let captions = CaptionModel()
-    private let store = SummaryStore()
+    private let transcript = TranscriptStore()
     private let metrics = MetricsStore()
     private let source = SystemAudioSource()
     private var transcriber: Transcriber?
     private var panel: NotchPanel?
     private var summaryWindow: SummaryWindow?
-    private var summarizer: Summarizer?
     private var agentController: AgentController?
 
     func applicationDidFinishLaunching(_: Notification) {
@@ -63,21 +62,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let agent = Keychain.openAIKey().map {
             CodexAgent(workdir: NSHomeDirectory() + "/.kilo", apiKey: $0)
         }
-        let controller = AgentController(store: store, agent: agent)
+        let controller = AgentController(store: transcript, agent: agent, metrics: metrics)
         self.agentController = controller
-        let win = SummaryWindow(store: store, metrics: metrics, controller: controller)
+        let win = SummaryWindow(store: transcript, metrics: metrics, controller: controller)
         win.show()
         summaryWindow = win
     }
 
     private func startPipeline() {
-        let client = Keychain.openAIKey().map { OpenAIClient(apiKey: $0) }
-        if client == nil {
-            logErr("⚠️ 沒有 OpenAI key（OPENAI_API_KEY 或 Keychain service=kilo account=openai）— summary / agent 停用，字幕照常")
+        if Keychain.openAIKey() == nil {
+            logErr("⚠️ 沒有 OpenAI key（OPENAI_API_KEY 或 Keychain service=kilo account=openai）— Kilo agent 停用，字幕 + 逐字稿照常")
         }
-        let summarizer = Summarizer(store: store, metrics: metrics, client: client)
-        self.summarizer = summarizer
-        let metrics = self.metrics
         let controller = agentController
 
         // 辨識語言：--lang en-US 等；預設 zh-TW
@@ -88,9 +83,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let transcriber = Transcriber(
             locale: Locale(identifier: lang), captions: captions,
             onFinal: { text in
-                summarizer.feed(text)
-                controller?.appendFinal(text)   // 累積逐字稿給 codex agent 當 context
-                metrics.recordFinal(chars: text.count)
+                controller?.appendFinal(text)   // → 逐字稿分段 + metrics + codex context
                 Telemetry.asr.info("final chars=\(text.count, privacy: .public)")
             })
         self.transcriber = transcriber
