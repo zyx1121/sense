@@ -1,93 +1,142 @@
 import AppKit
 import SwiftUI
 
-/// 可拖動的 summary / insight overlay 視窗：borderless、拖背景移動、floating。
+/// borderless panel 必須 override canBecomeKey，input TextField 才拿得到焦點打字。
+final class KeyablePanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+}
+
+/// 可拖動的 Kilo overlay：連續逐字稿 + 指令輸入 + agent 步驟 feed。floating、拖背景移動、高度動態。
 @MainActor
 final class SummaryWindow {
-    private let panel: NSPanel
+    private let panel: KeyablePanel
 
-    init(store: SummaryStore, metrics: MetricsStore) {
-        panel = NSPanel(
-            contentRect: NSRect(x: 80, y: 160, width: 320, height: 440),
+    init(store: TranscriptStore, controller: AgentController) {
+        let hosting = NSHostingController(
+            rootView: TranscriptView(store: store, controller: controller))
+        hosting.sizingOptions = [.preferredContentSize]
+
+        panel = KeyablePanel(
+            contentRect: NSRect(x: 80, y: 360, width: 360, height: 160),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered, defer: false)
         panel.level = .floating
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = true
-        panel.isMovableByWindowBackground = true            // 拖任意處移動
+        panel.isMovableByWindowBackground = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        let hosting = NSHostingView(rootView: SummaryView(store: store, metrics: metrics))
-        hosting.frame = NSRect(origin: .zero, size: panel.frame.size)
-        hosting.autoresizingMask = [.width, .height]
-        panel.contentView = hosting
+        panel.contentViewController = hosting
     }
 
     func show() { panel.orderFrontRegardless() }
 }
 
-struct SummaryView: View {
-    let store: SummaryStore
-    let metrics: MetricsStore
+struct TranscriptView: View {
+    let store: TranscriptStore
+    let controller: AgentController
+    @State private var input = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Insights")
-                .font(.headline)
-                .foregroundStyle(.white.opacity(0.75))
+            Text("Kilo")
+                .font(.headline).foregroundStyle(.white.opacity(0.85))
                 .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 8)
 
-            if store.insights.isEmpty {
-                Text("聽取中…摘要會出現在這裡")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.white.opacity(0.4))
-                    .padding(.horizontal, 16)
-                Spacer()
+            // 連續逐字稿：白(已整理) → 半白(定稿待整理) → 灰(辨識中，打字機)
+            if store.transcriptEmpty {
+                Text("聽取中…")
+                    .font(.system(size: 12)).foregroundStyle(.white.opacity(0.45))
+                    .padding(.horizontal, 16).padding(.bottom, 8)
             } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 10) {
-                        ForEach(store.insights.reversed()) { insight in
-                            Text(insight.text)
-                                .font(.system(size: 13))
-                                .foregroundStyle(.white)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(12)
-                                .background(.white.opacity(0.08), in: .rect(cornerRadius: 10))
-                        }
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        Text(transcriptText)
+                            .font(.system(size: 12))
+                            .lineSpacing(3.5)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 16)
+                        Color.clear.frame(height: 1).id("bottom")
                     }
-                    .padding(.horizontal, 14).padding(.bottom, 12)
+                    .frame(height: 230)
+                    .onChange(of: store.transcriptLength) { _, _ in
+                        proxy.scrollTo("bottom", anchor: .bottom)
+                    }
                 }
+                .padding(.bottom, 6)
             }
 
-            Divider().overlay(.white.opacity(0.1))
-            MetricFooter(metrics: metrics)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(.black.opacity(0.85), in: .rect(cornerRadius: 16))
-    }
-}
-
-private struct MetricFooter: View {
-    let metrics: MetricsStore
-
-    var body: some View {
-        HStack(spacing: 14) {
-            stat("段", "\(metrics.segments)")
-            stat("tok", "\(metrics.tokensIn)/\(metrics.tokensOut)")
-            stat("$", String(format: "%.4f", metrics.costUSD))
-            stat("延遲", String(format: "%.1fs", metrics.lastLatency))
-            if metrics.summaryErrors > 0 {
-                stat("err", "\(metrics.summaryErrors)", color: .red.opacity(0.85))
+            // Kilo feed：指令 + tool 步驟 + 淺藍打字機回應
+            if !store.feed.isEmpty {
+                VStack(alignment: .leading, spacing: 5) {
+                    ForEach(store.feed.suffix(8)) { step in
+                        stepRow(step)
+                    }
+                }
+                .padding(.horizontal, 16).padding(.vertical, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.white.opacity(0.04))
             }
-            Spacer()
+
+            // 指令輸入 → codex agent
+            HStack(spacing: 8) {
+                Image(systemName: "sparkle")
+                    .font(.system(size: 11)).foregroundStyle(.white.opacity(0.4))
+                TextField("問 Kilo，或叫它記錄…", text: $input)
+                    .textFieldStyle(.plain).font(.system(size: 12)).foregroundStyle(.white)
+                    .onSubmit { controller.submit(input); input = "" }
+                if store.thinking { ProgressView().controlSize(.small) }
+            }
+            .padding(.horizontal, 14).padding(.vertical, 9)
+            .background(.white.opacity(0.06))
         }
-        .padding(.horizontal, 16).padding(.vertical, 8)
+        .frame(width: 360)
+        .fixedSize(horizontal: false, vertical: true)
+        .glassEffect(in: .rect(cornerRadius: 16))
+        .animation(.spring(response: 0.4, dampingFraction: 0.82), value: store.transcriptEmpty)
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: store.feed.count)
     }
 
-    private func stat(_ label: String, _ value: String, color: Color = .white.opacity(0.8)) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(value).font(.system(size: 11, design: .monospaced)).foregroundStyle(color)
-            Text(label).font(.system(size: 8)).foregroundStyle(.white.opacity(0.4))
+    /// 三層透明度：已整理 → 定稿待整理 → 辨識中。
+    private var transcriptText: AttributedString {
+        func styled(_ s: String, _ opacity: Double) -> AttributedString {
+            var a = AttributedString(s)
+            a.foregroundColor = .white.opacity(opacity)
+            return a
+        }
+        return styled(store.polished, 0.92)
+            + styled(store.pendingRaw, 0.55)
+            + styled(store.volatileShown, 0.38)
+    }
+
+    @ViewBuilder
+    private func stepRow(_ step: AgentStep) -> some View {
+        switch step.kind {
+        case .user:
+            Text("❯ \(step.text)")
+                .font(.system(size: 11)).foregroundStyle(.white.opacity(0.5))
+                .lineLimit(2)
+        case .tool:
+            HStack(spacing: 6) {
+                if step.running {
+                    ProgressView().controlSize(.mini)
+                } else {
+                    Image(systemName: step.failed ? "xmark.circle" : "checkmark.circle")
+                        .font(.system(size: 9))
+                        .foregroundStyle(step.failed ? .red.opacity(0.8) : .white.opacity(0.35))
+                }
+                Text(step.text)
+                    .font(.system(size: 10.5, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.55))
+                    .lineLimit(1)
+            }
+        case .reply:
+            Text(step.shown)
+                .font(.system(size: 12)).foregroundStyle(.cyan.opacity(0.9))
+                .frame(maxWidth: .infinity, alignment: .leading)
+        case .error:
+            Text("⚠️ \(step.text)")
+                .font(.system(size: 11)).foregroundStyle(.orange.opacity(0.9))
         }
     }
 }

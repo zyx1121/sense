@@ -6,5 +6,6 @@ import OSLog
 enum Telemetry {
     static let asr = Logger(subsystem: "tw.zyx.kilo", category: "asr")
     static let summary = Logger(subsystem: "tw.zyx.kilo", category: "summary")
+    static let polish = Logger(subsystem: "tw.zyx.kilo", category: "polish")
     static let signposter = OSSignposter(subsystem: "tw.zyx.kilo", category: "summary")
 }

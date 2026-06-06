@@ -7,12 +7,13 @@ enum TranscriberError: Error {
     case noAudioFormat
 }
 
-/// SpeechAnalyzer + SpeechTranscriber 包裝：volatile 進 CaptionModel；
-/// 每段 final 同時餵 onFinal（給 Summarizer）。串接參考 swift-scribe。
+/// SpeechAnalyzer + SpeechTranscriber 包裝：volatile 進 CaptionModel + onVolatile；
+/// 每段 final 同時餵 onFinal。串接參考 swift-scribe。
 @MainActor
 final class Transcriber {
     private let locale: Locale
     private let captions: CaptionModel
+    private let onVolatile: (@MainActor (String) -> Void)?
     private let onFinal: (@MainActor (String) -> Void)?
     private var transcriber: SpeechTranscriber?
     private var analyzer: SpeechAnalyzer?
@@ -22,9 +23,12 @@ final class Transcriber {
     private var resultsTask: Task<Void, Never>?
     private let converter = BufferConverter()
 
-    init(locale: Locale, captions: CaptionModel, onFinal: (@MainActor (String) -> Void)? = nil) {
+    init(locale: Locale, captions: CaptionModel,
+         onVolatile: (@MainActor (String) -> Void)? = nil,
+         onFinal: (@MainActor (String) -> Void)? = nil) {
         self.locale = locale
         self.captions = captions
+        self.onVolatile = onVolatile
         self.onFinal = onFinal
         let (stream, continuation) = AsyncStream<AnalyzerInput>.makeStream()
         self.inputSequence = stream
@@ -49,6 +53,7 @@ final class Transcriber {
         try await analyzer.prepareToAnalyze(in: format)  // ANE 預熱
 
         let captions = self.captions
+        let onVolatile = self.onVolatile
         let onFinal = self.onFinal
         resultsTask = Task {
             do {
@@ -56,9 +61,10 @@ final class Transcriber {
                     let text = String(result.text.characters)
                     if result.isFinal {
                         captions.commitFinal(text)
-                        onFinal?(text)               // 餵 Summarizer（只送定稿）
+                        onFinal?(text)               // 定稿 → 逐字稿 + polisher
                     } else {
                         captions.setVolatile(text)
+                        onVolatile?(text)            // 辨識中 → overlay 灰字尾巴
                     }
                 }
             } catch {
