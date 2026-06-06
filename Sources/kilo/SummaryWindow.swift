@@ -54,8 +54,12 @@ struct TranscriptView: View {
                         Text(transcriptText)
                             .font(.system(size: 12))
                             .lineSpacing(3.5)
+                            .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal, 16)
+                            .contextMenu {
+                                Button("複製逐字稿") { copyText(String(transcriptText.characters)) }
+                            }
                         Color.clear.frame(height: 1).id("bottom")
                     }
                     .frame(height: 230)
@@ -73,6 +77,12 @@ struct TranscriptView: View {
                         VStack(alignment: .leading, spacing: 5) {
                             ForEach(store.feed) { step in
                                 stepRow(step)
+                                    .contextMenu {
+                                        Button("複製") {
+                                            copyText(step.kind == .reply
+                                                ? String(step.rendered.characters) : step.text)
+                                        }
+                                    }
                             }
                             Color.clear.frame(height: 1).id("feedBottom")
                         }
@@ -172,11 +182,17 @@ struct TranscriptView: View {
             Text(prefix(step.rendered, step.shownChars))
                 .font(.system(size: 12)).foregroundStyle(.cyan.opacity(0.9))
                 .lineSpacing(2.5)
+                .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
         case .error:
             Text("⚠️ \(step.text)")
                 .font(.system(size: 11)).foregroundStyle(.orange.opacity(0.9))
         }
+    }
+
+    private func copyText(_ s: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(s, forType: .string)
     }
 
     /// AttributedString 前 n 個字元（打字機切片，樣式跟著走）。

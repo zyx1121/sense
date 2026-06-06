@@ -22,13 +22,52 @@ struct AgentStep: Identifiable, Equatable {
     }
 }
 
-/// reply 的 markdown → AttributedString（inline only：bold / italic / code，保留換行）。
-/// 解析放 append 時做一次，打字機切「解析後」的前綴 — streaming 中不會先閃裸 `**` 再變粗體。
+/// reply 的 markdown → AttributedString。解析放 append 時做一次，
+/// 打字機切「解析後」的前綴 — streaming 中不會先閃裸 `**` 再變粗體。
+/// 1. `- ` / `* ` 列表轉 `•`（inline 模式不排版 block，自己轉）
+/// 2. inline 解析：bold / italic / code，保留換行
+/// 3. 檔案路徑自動標成 link（點擊走 openFeedLink 的 workdir 解析）
 private func renderMarkdown(_ s: String) -> AttributedString {
-    (try? AttributedString(
-        markdown: s,
+    let bulleted = s.split(separator: "\n", omittingEmptySubsequences: false).map { line in
+        let body = line.drop(while: { $0 == " " })
+        guard body.hasPrefix("- ") || body.hasPrefix("* ") else { return String(line) }
+        let indent = String(repeating: " ", count: line.count - body.count)
+        return "\(indent)•  \(body.dropFirst(2))"
+    }.joined(separator: "\n")
+
+    var a = (try? AttributedString(
+        markdown: bulleted,
         options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
-        ?? AttributedString(s)
+        ?? AttributedString(bulleted)
+    linkifyPaths(&a)
+    return a
+}
+
+/// 長得像路徑的片段標成 link + 底線；markdown 原生 link 也補底線，affordance 一致。
+private func linkifyPaths(_ a: inout AttributedString) {
+    let s = String(a.characters)
+    // 副檔名錨定（檔名可含中文）+ ~/、/ 開頭的目錄路徑
+    let ext = /[\p{L}\p{N}._~\-\/]+\.(?:md|txt|json|ya?ml|toml|csv|log|swift|py|sh)/
+    let dir = /(?:~|\/)[A-Za-z0-9._\-\/]+/
+    var ranges = s.ranges(of: ext)
+    for r in s.ranges(of: dir) where !ranges.contains(where: { $0.overlaps(r) }) {
+        ranges.append(r)
+    }
+
+    let chars = a.characters
+    for r in ranges {
+        var path = String(s[r])
+        while path.hasSuffix(".") || path.hasSuffix(",") { path.removeLast() }  // 句尾標點不算
+        guard !path.isEmpty else { continue }
+        let lo = chars.index(chars.startIndex, offsetBy: s.distance(from: s.startIndex, to: r.lowerBound))
+        let hi = chars.index(lo, offsetBy: path.count)
+        let ar = lo..<hi
+        guard !a[ar].runs.contains(where: { $0.link != nil }) else { continue }  // 不蓋 markdown link
+        a[ar].link = URL(string: path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? path)
+    }
+    for run in a.runs where run.link != nil {
+        a[run.range].underlineStyle = .single
+    }
 }
 
 /// 接合兩段文字：兩側都是 ASCII 字母/數字才補空格（英文），CJK 直接相連。
