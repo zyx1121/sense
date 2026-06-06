@@ -18,6 +18,7 @@
 開著 kilo 看影片、開會、上課：
 
 - **瀏海字幕** — 系統音訊即時轉錄，volatile 灰字逐字打出、定稿轉白，瀏海下方一行流過
+- **中英自動切換** — 兩路 SpeechTranscriber 同時轉錄，比較各路定稿信心（EMA + 遲滯），講到哪個語言就自動走哪路
 - **連續逐字稿** — 可拖動的 overlay 視窗累積全文；小模型背景把生稿補標點、修辨識錯字、分段 — 灰字尾巴一直流入，幾秒後被整理過的白字取代
 - **問 Kilo** — 輸入框直通 codex agent（帶最近逐字稿 + session 記憶），tool use 步驟即時浮出、回應打字機串流；說「記錄下來」它就寫筆記進 `~/.kilo/`，回覆裡的路徑點了直接開
 - **Shake 圈選** — 晃游標進選取模式：螢幕變暗、游標下的 UI 元素亮起，左鍵點擊收集（文字收文字、其他截圖），右鍵結束；素材變輸入框上方的 chips，下一輪丟給 codex 看圖分析
@@ -51,7 +52,8 @@ make logs      # 即時看 Telemetry（asr / polish / agent / shake）
 逐字稿整理模型自動選：Apple Intelligence 有開 → on-device FoundationModels（免費本地）；沒開 → `gpt-5.4-nano` 直打 API；都沒有 → 原文直出。
 
 ```bash
-./build/kilo.app/Contents/MacOS/kilo --lang en-US   # 換辨識語言（預設 zh-TW）
+./build/kilo.app/Contents/MacOS/kilo --langs zh-TW,en-US   # 雙路信心擇優（預設）
+./build/kilo.app/Contents/MacOS/kilo --lang ja-JP          # 單語模式
 ```
 
 ## 結構

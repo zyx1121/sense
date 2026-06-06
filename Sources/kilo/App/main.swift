@@ -33,7 +33,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let transcript = TranscriptStore()
     private let metrics = MetricsStore()
     private let source = SystemAudioSource()
-    private var transcriber: Transcriber?
+    private var transcribers: [Transcriber] = []
+    private var router: LanguageRouter?
     private var panel: NotchPanel?
     private var summaryWindow: SummaryWindow?
     private var agentController: AgentController?
@@ -93,33 +94,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if Keychain.openAIKey() == nil {
             logErr("⚠️ 沒有 OpenAI key（OPENAI_API_KEY 或 Keychain service=kilo account=openai）— Kilo agent 停用，字幕 + 逐字稿照常")
         }
-        let controller = agentController
+        guard let controller = agentController else { return }
 
-        // 辨識語言：--lang en-US 等；預設 zh-TW
+        // 辨識語言：--langs zh-TW,en-US（雙路擇優，預設）；--lang en-US（單語，向後相容）
         let args = CommandLine.arguments
-        let lang = args.firstIndex(of: "--lang").flatMap { args.indices.contains($0 + 1) ? args[$0 + 1] : nil } ?? "zh-TW"
-        logErr("辨識語言：\(lang)")
+        func value(after flag: String) -> String? {
+            args.firstIndex(of: flag).flatMap { args.indices.contains($0 + 1) ? args[$0 + 1] : nil }
+        }
+        let langs = (value(after: "--langs") ?? value(after: "--lang") ?? "zh-TW,en-US")
+            .split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
+        logErr("辨識語言：\(langs.joined(separator: " + "))\(langs.count > 1 ? "（信心擇優）" : "")")
 
-        let transcriber = Transcriber(
-            locale: Locale(identifier: lang), captions: captions,
-            onVolatile: { text in
-                controller?.appendVolatile(text)  // → overlay 灰字尾巴（打字機）
-            },
-            onFinal: { text in
-                controller?.appendFinal(text)   // → 逐字稿 + polisher + metrics + codex context
-                Telemetry.asr.info("final chars=\(text.count, privacy: .public)")
-            })
-        self.transcriber = transcriber
+        let router = LanguageRouter(initial: langs[0], captions: captions, controller: controller)
+        self.router = router
+        let transcribers = langs.map { lang in
+            Transcriber(locale: Locale(identifier: lang)) { result in
+                router.handle(result)
+            }
+        }
+        self.transcribers = transcribers
         Task {
             do {
-                try await transcriber.setUp()
-                let audio = try await source.start()
+                for t in transcribers { try await t.setUp() }
+                let audio = try await startAudioWithRetry()
                 logErr("就緒，聽取中…")
-                for await buffer in audio { try await transcriber.stream(buffer) }
+                for await buffer in audio {
+                    for t in transcribers { try await t.stream(buffer) }
+                }
             } catch {
                 logErr("error: \(error)")
             }
         }
+    }
+
+    /// SCK audio 啟動偶發 -3818（上個 capture session 還在收尾、開機競態）— 遞增退避重試。
+    private func startAudioWithRetry(attempts: Int = 5) async throws -> AsyncStream<PCMBuffer> {
+        var lastError: Error?
+        for i in 1...attempts {
+            do {
+                return try await source.start()
+            } catch {
+                lastError = error
+                logErr("audio start 失敗（\(i)/\(attempts)），\(i * 2)s 後重試：\(error.localizedDescription)")
+                try? await Task.sleep(for: .seconds(Double(i) * 2))
+            }
+        }
+        throw lastError ?? SystemAudioError.noDisplay
     }
 }
 

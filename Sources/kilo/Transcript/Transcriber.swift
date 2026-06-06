@@ -7,14 +7,20 @@ enum TranscriberError: Error {
     case noAudioFormat
 }
 
-/// SpeechAnalyzer + SpeechTranscriber 包裝：volatile 進 CaptionModel + onVolatile；
-/// 每段 final 同時餵 onFinal。串接參考 swift-scribe。
+/// 一路 ASR 的單筆結果：哪個語言、是否定稿、run 平均信心。
+struct ASRResult {
+    let locale: String        // bcp47，如 "zh-TW"
+    let text: String
+    let isFinal: Bool
+    let confidence: Double?   // .transcriptionConfidence run 平均；沒有就 nil
+}
+
+/// SpeechAnalyzer + SpeechTranscriber 包裝：單一 locale 一路，結果統一走 onResult。
+/// 中英雙路並跑時各自一個 instance，由 LanguageRouter 擇優。串接參考 swift-scribe。
 @MainActor
 final class Transcriber {
     private let locale: Locale
-    private let captions: CaptionModel
-    private let onVolatile: (@MainActor (String) -> Void)?
-    private let onFinal: (@MainActor (String) -> Void)?
+    private let onResult: @MainActor (ASRResult) -> Void
     private var transcriber: SpeechTranscriber?
     private var analyzer: SpeechAnalyzer?
     private var analyzerFormat: AVAudioFormat?
@@ -23,13 +29,9 @@ final class Transcriber {
     private var resultsTask: Task<Void, Never>?
     private let converter = BufferConverter()
 
-    init(locale: Locale, captions: CaptionModel,
-         onVolatile: (@MainActor (String) -> Void)? = nil,
-         onFinal: (@MainActor (String) -> Void)? = nil) {
+    init(locale: Locale, onResult: @escaping @MainActor (ASRResult) -> Void) {
         self.locale = locale
-        self.captions = captions
-        self.onVolatile = onVolatile
-        self.onFinal = onFinal
+        self.onResult = onResult
         let (stream, continuation) = AsyncStream<AnalyzerInput>.makeStream()
         self.inputSequence = stream
         self.inputBuilder = continuation
@@ -40,7 +42,7 @@ final class Transcriber {
             locale: locale,
             transcriptionOptions: [],
             reportingOptions: [.volatileResults, .fastResults],  // fastResults：偏即時
-            attributeOptions: [.audioTimeRange])
+            attributeOptions: [.audioTimeRange, .transcriptionConfidence])
         self.transcriber = transcriber
         let analyzer = SpeechAnalyzer(modules: [transcriber])
         self.analyzer = analyzer
@@ -52,27 +54,37 @@ final class Transcriber {
         guard let format else { throw TranscriberError.noAudioFormat }
         try await analyzer.prepareToAnalyze(in: format)  // ANE 預熱
 
-        let captions = self.captions
-        let onVolatile = self.onVolatile
-        let onFinal = self.onFinal
+        let localeID = locale.identifier(.bcp47)
+        let onResult = self.onResult
         resultsTask = Task {
             do {
                 for try await case let result in transcriber.results {
                     let text = String(result.text.characters)
-                    if result.isFinal {
-                        captions.commitFinal(text)
-                        onFinal?(text)               // 定稿 → 逐字稿 + polisher
-                    } else {
-                        captions.setVolatile(text)
-                        onVolatile?(text)            // 辨識中 → overlay 灰字尾巴
-                    }
+                    onResult(ASRResult(
+                        locale: localeID,
+                        text: text,
+                        isFinal: result.isFinal,
+                        confidence: Self.meanConfidence(result.text)))
                 }
             } catch {
-                FileHandle.standardError.write(Data("results error: \(error)\n".utf8))
+                FileHandle.standardError.write(Data("results error [\(localeID)]: \(error)\n".utf8))
             }
         }
 
         try await analyzer.start(inputSequence: inputSequence)
+    }
+
+    /// run 平均信心（以字元數加權；volatile 可能整串沒有 → nil）。
+    private static func meanConfidence(_ text: AttributedString) -> Double? {
+        var sum = 0.0
+        var weight = 0
+        for run in text.runs {
+            guard let c = run.transcriptionConfidence else { continue }
+            let n = text[run.range].characters.count
+            sum += c * Double(n)
+            weight += n
+        }
+        return weight > 0 ? sum / Double(weight) : nil
     }
 
     func stream(_ buffer: PCMBuffer) async throws {

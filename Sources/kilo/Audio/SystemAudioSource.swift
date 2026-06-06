@@ -40,7 +40,14 @@ final class SystemAudioSource: NSObject, AudioSource, SCStreamOutput, SCStreamDe
         self.continuation = continuation
         self.stream = stream
 
-        try await stream.startCapture()
+        do {
+            try await stream.startCapture()
+        } catch {
+            // 啟動失敗（-3818 等）要放掉 ref — 留著殭屍 SCStream 會擋住下一次 retry
+            self.stream = nil
+            self.continuation = nil
+            throw error
+        }
         return audioStream
     }
 
