@@ -42,7 +42,7 @@ make locales   # dump SpeechTranscriber 支援語言
 make logs      # 即時看 Telemetry（asr / polish / agent / shake）
 ```
 
-裝好後選單列會有 sparkle 圖示 — 開逐字稿資料夾、權限設定、開機自啟、重啟、結束都在那。
+裝好後選單列會有 kilo 圖示 — 開逐字稿資料夾、權限設定、開機自啟、重啟、結束都在那。
 
 ## 分發（給別人）
 
@@ -67,6 +67,19 @@ make release   # Developer ID 簽 + Apple 公證 + DMG，對方雙擊即裝
 ./build/kilo.app/Contents/MacOS/kilo --langs zh-TW,en-US   # 雙路信心擇優（預設）
 ./build/kilo.app/Contents/MacOS/kilo --lang ja-JP          # 單語模式
 ```
+
+## 隱私 — 資料去哪
+
+kilo 是感官 agent，會錄系統音訊、截你圈選的畫面。資料流向講清楚：
+
+| 資料 | 去哪 |
+|---|---|
+| 系統音訊 | **本機** SpeechAnalyzer 即時轉錄，音訊不離開你的 Mac |
+| 逐字稿 | 送 **OpenAI** `gpt-5.4-mini` 整理潤稿 |
+| 你的指令 + 最近逐字稿 + 圈選截圖 | 送 **codex / OpenAI** 產生回應 |
+| 筆記 / 逐字稿存檔 | **本機** `~/.kilo`，不上傳 |
+
+**key 與 codex 都是你自己的** — kilo 用你 Keychain 裡的 OpenAI key、你 PATH 上的 codex CLI，不內建、不代管、不經過作者的任何伺服器。送什麼給 OpenAI 由你的使用決定，kilo 只是把它接起來；逐字稿與筆記只存在你本機的 `~/.kilo`。
 
 ## 結構
 
