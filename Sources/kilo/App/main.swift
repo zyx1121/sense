@@ -52,16 +52,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// 麥克風 → 語音指令（「kilo …」）。指令只能從使用者的嘴來 —
     /// 系統音訊路沒有指令權，影片/直播喊 kilo 都不算數。
+    /// 預設關（很多場景不能講話 + mic 常駐有錄音指示點），`--voice` 開啟。
     private func startMicCommands() {
+        guard CommandLine.arguments.contains("--voice") else {
+            logErr("語音指令未啟用（--voice 開啟）")
+            return
+        }
         guard let controller = agentController else { return }
+        let wake = VoiceWake()
+        let captions = self.captions
         let transcriber = Transcriber(
             locale: Locale(identifier: "zh-TW"),
             contextualStrings: ["kilo", "Kilo"]) { result in
             guard result.isFinal else { return }
             Telemetry.asr.info("mic final: \(String(result.text.prefix(40)), privacy: .public)")
-            guard let cmd = VoiceCommand.parse(result.text), !controller.isThinking else { return }
-            Telemetry.asr.info("voice command: \(cmd, privacy: .public)")
-            controller.submit(cmd)
+            switch wake.process(result.text) {
+            case .armed:
+                Telemetry.asr.info("wake armed — listening for command")
+                captions.setVolatile("在聽，請說指令…")   // 瀏海給個回饋
+            case .command(let cmd):
+                guard !controller.isThinking else { return }
+                Telemetry.asr.info("voice command: \(cmd, privacy: .public)")
+                captions.commitFinal("→ \(cmd)")
+                controller.submit(cmd)
+            case nil:
+                break
+            }
         }
         self.micTranscriber = transcriber
         let source = micSource

@@ -54,6 +54,7 @@ make logs      # 即時看 Telemetry（asr / polish / agent / shake）
 ```bash
 ./build/kilo.app/Contents/MacOS/kilo --langs zh-TW,en-US   # 雙路信心擇優（預設）
 ./build/kilo.app/Contents/MacOS/kilo --lang ja-JP          # 單語模式
+./build/kilo.app/Contents/MacOS/kilo --voice               # 麥克風語音指令（「kilo …」，預設關）
 ```
 
 ## 結構
