@@ -33,7 +33,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let transcript = TranscriptStore()
     private let metrics = MetricsStore()
     private let source = SystemAudioSource()
+    private let micSource = MicAudioSource()
     private var transcribers: [Transcriber] = []
+    private var micTranscriber: Transcriber?
     private var router: LanguageRouter?
     private var panel: NotchPanel?
     private var summaryWindow: SummaryWindow?
@@ -45,6 +47,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         showSummaryWindow()
         startShakeCapture()
         startPipeline()
+        startMicCommands()
+    }
+
+    /// 麥克風 → 語音指令（「kilo …」）。指令只能從使用者的嘴來 —
+    /// 系統音訊路沒有指令權，影片/直播喊 kilo 都不算數。
+    private func startMicCommands() {
+        guard let controller = agentController else { return }
+        let transcriber = Transcriber(
+            locale: Locale(identifier: "zh-TW"),
+            contextualStrings: ["kilo", "Kilo"]) { result in
+            guard result.isFinal else { return }
+            Telemetry.asr.info("mic final: \(String(result.text.prefix(40)), privacy: .public)")
+            guard let cmd = VoiceCommand.parse(result.text), !controller.isThinking else { return }
+            Telemetry.asr.info("voice command: \(cmd, privacy: .public)")
+            controller.submit(cmd)
+        }
+        self.micTranscriber = transcriber
+        let source = micSource
+        Task {
+            guard await MicAudioSource.requestPermission() else {
+                logErr("⚠️ 麥克風權限未授予 — 語音指令停用（逐字稿照常）")
+                return
+            }
+            do {
+                try await transcriber.setUp()
+                let audio = try await source.start()
+                logErr("語音指令就緒（對麥克風說「kilo …」）")
+                for await buffer in audio { try await transcriber.stream(buffer) }
+            } catch {
+                logErr("mic pipeline error: \(error)")
+            }
+        }
     }
 
     /// 晃游標 → 圈選畫面元素給 Kilo 看（dim + spotlight + click capture）。
@@ -81,7 +115,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let agent = Keychain.openAIKey().map {
             CodexAgent(workdir: kiloWorkdir, apiKey: $0)
         }
-        let polisher = TranscriptPolisher(store: transcript)
+        let polisher = TranscriptPolisher(store: transcript, archiver: TranscriptArchiver())
         logErr("逐字稿整理模型：\(polisher.backendName)")
         let controller = AgentController(store: transcript, agent: agent, metrics: metrics, polisher: polisher)
         self.agentController = controller

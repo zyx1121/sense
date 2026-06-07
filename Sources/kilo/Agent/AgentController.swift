@@ -8,7 +8,11 @@ final class AgentController {
     private let agent: CodexAgent?
     private let metrics: MetricsStore
     private let polisher: TranscriptPolisher
+    private let sources = SourceTracker()
     private var threadID: String?  // codex session，app 重啟歸零
+
+    /// router 的語音指令路徑需要知道 agent 是否忙著（忙著就當一般逐字稿）。
+    var isThinking: Bool { store.thinking }
 
     init(store: TranscriptStore, agent: CodexAgent?, metrics: MetricsStore, polisher: TranscriptPolisher) {
         self.store = store
@@ -22,9 +26,10 @@ final class AgentController {
         store.setVolatile(text)
     }
 
-    /// 每段定稿進逐字稿（顯示 + codex context），並戳 polisher 整理。locale 跟著進 pending，整理時選對指令語言。
+    /// 每段定稿進逐字稿（顯示 + codex context），並戳 polisher 整理。
+    /// locale 跟著進 pending（整理選對指令語言）、來源（前景 app）跟著進歸檔。
     func appendFinal(_ text: String, locale: String) {
-        store.commitFinal(text, locale: locale)
+        store.commitFinal(text, locale: locale, source: sources.current())
         metrics.recordSegment(chars: text.count)
         polisher.nudge()
     }

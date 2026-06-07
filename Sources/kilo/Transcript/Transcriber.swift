@@ -20,6 +20,7 @@ struct ASRResult {
 @MainActor
 final class Transcriber {
     private let locale: Locale
+    private let contextualStrings: [String]?
     private let onResult: @MainActor (ASRResult) -> Void
     private var transcriber: SpeechTranscriber?
     private var analyzer: SpeechAnalyzer?
@@ -29,8 +30,12 @@ final class Transcriber {
     private var resultsTask: Task<Void, Never>?
     private let converter = BufferConverter()
 
-    init(locale: Locale, onResult: @escaping @MainActor (ASRResult) -> Void) {
+    /// contextualStrings：詞彙偏置（AnalysisContext）— mic 路用來讓 ASR 認得 "kilo"，
+    /// 不偏置時 zh 模型的語言先驗會把它拗成 Klow/Helow/Hello（真機實測）。
+    init(locale: Locale, contextualStrings: [String]? = nil,
+         onResult: @escaping @MainActor (ASRResult) -> Void) {
         self.locale = locale
+        self.contextualStrings = contextualStrings
         self.onResult = onResult
         let (stream, continuation) = AsyncStream<AnalyzerInput>.makeStream()
         self.inputSequence = stream
@@ -46,6 +51,12 @@ final class Transcriber {
         self.transcriber = transcriber
         let analyzer = SpeechAnalyzer(modules: [transcriber])
         self.analyzer = analyzer
+
+        if let contextualStrings {
+            let ctx = AnalysisContext()
+            ctx.contextualStrings = [.general: contextualStrings]
+            try await analyzer.setContext(ctx)
+        }
 
         try await ensureModel(transcriber: transcriber, locale: locale)
 

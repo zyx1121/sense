@@ -78,10 +78,12 @@ private func glue(_ a: String, _ b: String) -> String {
     return a + b
 }
 
-/// 待整理的一段定稿 — 帶語言標籤（polisher 按語言分批整理，指令語言跟著走才不會被翻譯）。
+/// 待整理的一段定稿 — 帶語言標籤（polisher 按語言分批整理，指令語言跟著走才不會被翻譯）
+/// 與來源（前景 app / 視窗標題，歸檔時標出處）。
 struct PendingSegment {
     let locale: String   // bcp47，如 "zh-TW"
     let text: String
+    let source: String?
 }
 
 /// 逐字稿連續文件流 + Kilo agent 步驟 feed。window 顯示、codex agent 讀來思考。
@@ -105,6 +107,12 @@ final class TranscriptStore {
     /// shake 圈選收進來、等下一輪 codex 帶上的素材。
     private(set) var attachments: [Asset] = []
 
+    // — overlay 可見性：shake / 打字 / agent 活動 / hover 續命，閒置自動收合 —
+    // 聲音（逐字稿流入）刻意不續命：那是 notch 的展開條件，overlay 只跟「使用者在動它」走。
+    private(set) var overlayShown = true
+    private var overlayHideTask: Task<Void, Never>?
+    private let overlayIdleSeconds: Double = 30
+
     var transcriptLength: Int { polished.count + pendingRaw.count + volatileShown.count }
     var transcriptEmpty: Bool { polished.isEmpty && pendingRaw.isEmpty && volatileShown.isEmpty }
 
@@ -118,29 +126,29 @@ final class TranscriptStore {
         pumpVolatile()
     }
 
-    func commitFinal(_ text: String, locale: String) {
+    func commitFinal(_ text: String, locale: String, source: String? = nil) {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         volatileTask?.cancel(); volatileTask = nil
         volatileTarget = ""; volatileShown = ""
         guard !t.isEmpty else { return }
-        pending.append(PendingSegment(locale: locale, text: t))  // 一筆 final 一段，不合併 — polisher 按段消耗才不會吃到飛中的新字
+        pending.append(PendingSegment(locale: locale, text: t, source: source))  // 一筆 final 一段，不合併 — polisher 按段消耗才不會吃到飛中的新字
         while pendingRaw.count > 12000, !pending.isEmpty { pending.removeFirst() }  // 無 polisher 時的安全閥
     }
 
     /// pending 開頭「同語言的連續段」— polisher 的一個整理批次。
     /// boundary = 後面還接著別的語言（語言切換點，提示 polisher 別等湊字數、快點沖掉）。
-    func firstPendingRun() -> (locale: String, text: String, segments: Int, boundary: Bool)? {
+    func firstPendingRun() -> (locale: String, text: String, segments: Int, boundary: Bool, source: String?)? {
         guard let first = pending.first else { return nil }
         var text = first.text
         var n = 1
         for seg in pending.dropFirst() {
             guard seg.locale == first.locale else {
-                return (first.locale, text, n, true)
+                return (first.locale, text, n, true, first.source)
             }
             text = glue(text, seg.text)
             n += 1
         }
-        return (first.locale, text, n, false)
+        return (first.locale, text, n, false, first.source)
     }
 
     private var lastPolishedLocale: String?
@@ -149,15 +157,17 @@ final class TranscriptStore {
     /// 段落空行由這裡的確定性後處理保證（模型實測不穩定遵守）；批次接合規則：
     /// 換語言一律空行（語言切換必是新段 — 沒標點的雜訊批才不會把下一語言黏進同一行）、
     /// 同語言看句末標點（有 → 空行；無 → 斷句續接）。
-    func commitPolished(_ cleaned: String, locale: String, consumedSegments: Int) {
+    @discardableResult
+    func commitPolished(_ cleaned: String, locale: String, consumedSegments: Int) -> String? {
         pending.removeFirst(min(consumedSegments, pending.count))
         let c = breakLines(trimOverlap(cleaned.trimmingCharacters(in: .whitespacesAndNewlines)))
-        guard !c.isEmpty else { return }
+        guard !c.isEmpty else { return nil }
         let sentenceEnd = polished.last.map { "。！？.!?…".contains($0) } ?? false
         let langChanged = lastPolishedLocale != nil && lastPolishedLocale != locale
         polished = polished.isEmpty ? c : ((sentenceEnd || langChanged) ? polished + "\n\n" + c : glue(polished, c))
         lastPolishedLocale = locale
         if polished.count > 12000 { polished = String(polished.suffix(9000)) }
+        return c  // 實際上稿的文字（裁 echo、斷行後）— 給歸檔用
     }
 
     /// 句末標點後斷行：中文「。！？」直接斷；英文「. ! ?」後接空格才斷（"U.S. Army" 會誤斷，接受）。
@@ -229,6 +239,7 @@ final class TranscriptStore {
         stepSeq += 1
         feed.append(AgentStep(id: "user-\(stepSeq)", kind: .user, text: instruction, revealed: true))
         trimFeed()
+        touchOverlay()  // agent 活動 = 在動 overlay（語音指令觸發時要自己展開）
     }
 
     /// tool 步驟進度：同 id 更新（in_progress → completed），新 id 追加。
@@ -249,6 +260,7 @@ final class TranscriptStore {
         feed.append(AgentStep(id: "reply-\(stepSeq)", kind: .reply, text: text, revealed: false))
         trimFeed()
         pumpReply()
+        touchOverlay()
     }
 
     func appendError(_ text: String) {
@@ -258,9 +270,29 @@ final class TranscriptStore {
 
     func setThinking(_ b: Bool) { thinking = b }
 
+    // MARK: - Overlay 可見性
+
+    /// 有人在動 overlay：展開 + 重置閒置計時；agent 還在跑就不收。
+    func touchOverlay() {
+        overlayShown = true
+        overlayHideTask?.cancel()
+        overlayHideTask = Task { [weak self] in
+            while let self, !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(overlayIdleSeconds))
+                guard !Task.isCancelled else { return }
+                if thinking { continue }  // 回覆進行中不收，醒著等下一輪閒置
+                overlayShown = false
+                return
+            }
+        }
+    }
+
     // MARK: - Attachments（shake 圈選素材）
 
-    func addAttachment(_ a: Asset) { attachments.append(a) }
+    func addAttachment(_ a: Asset) {
+        attachments.append(a)
+        touchOverlay()
+    }
     func removeAttachment(_ a: Asset) { attachments.removeAll { $0.id == a.id } }
     func clearAttachments() { attachments.removeAll() }
 

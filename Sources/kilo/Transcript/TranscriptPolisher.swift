@@ -93,14 +93,16 @@ struct OpenAIPolishBackend: PolishBackend {
 @MainActor
 final class TranscriptPolisher {
     private let store: TranscriptStore
+    private let archiver: TranscriptArchiver
     private let backend: PolishBackend?
     private var running = false
     private var idleTask: Task<Void, Never>?
 
     var backendName: String { backend?.name ?? "無（原文直出）" }
 
-    init(store: TranscriptStore) {
+    init(store: TranscriptStore, archiver: TranscriptArchiver) {
         self.store = store
+        self.archiver = archiver
         if SystemLanguageModel.default.isAvailable {
             backend = FoundationModelBackend()
         } else if let key = Keychain.openAIKey() {
@@ -131,14 +133,16 @@ final class TranscriptPolisher {
         idleTask?.cancel()
         let tail = String(store.polished.suffix(120))
         Task {
+            var committed: String?
             do {
                 let cleaned = try await backend.polish(chunk: run.text, locale: run.locale, contextTail: tail)
-                store.commitPolished(cleaned.isEmpty ? run.text : cleaned, locale: run.locale, consumedSegments: run.segments)
+                committed = store.commitPolished(cleaned.isEmpty ? run.text : cleaned, locale: run.locale, consumedSegments: run.segments)
                 Telemetry.polish.info("polished [\(run.locale, privacy: .public)] \(run.text.count, privacy: .public) -> \(cleaned.count, privacy: .public) chars")
             } catch {
-                store.commitPolished(run.text, locale: run.locale, consumedSegments: run.segments)  // 原文轉正，不卡顯示
+                committed = store.commitPolished(run.text, locale: run.locale, consumedSegments: run.segments)  // 原文轉正，不卡顯示
                 Telemetry.polish.error("polish failed: \(error.localizedDescription, privacy: .public)")
             }
+            if let committed { archiver.append(committed, source: run.source) }  // 持久化（整理後的定稿）
             running = false
             nudge()  // 積壓續跑 / 重設 idle timer
         }

@@ -10,8 +10,10 @@ final class KeyablePanel: NSPanel {
 @MainActor
 final class SummaryWindow {
     private let panel: KeyablePanel
+    private let store: TranscriptStore
 
     init(store: TranscriptStore, controller: AgentController) {
+        self.store = store
         let hosting = NSHostingController(
             rootView: TranscriptView(store: store, controller: controller))
         hosting.sizingOptions = [.preferredContentSize]
@@ -29,7 +31,19 @@ final class SummaryWindow {
         panel.contentViewController = hosting
     }
 
-    func show() { panel.orderFrontRegardless() }
+    func show() {
+        panel.orderFrontRegardless()
+        observeVisibility()
+    }
+
+    /// overlay 收合（SwiftUI 淡出）時 panel 對滑鼠透明 — 隱形的玻璃不該擋到下面的點擊。
+    private func observeVisibility() {
+        withObservationTracking {
+            panel.ignoresMouseEvents = !store.overlayShown
+        } onChange: { [weak self] in
+            Task { @MainActor in self?.observeVisibility() }
+        }
+    }
 
     /// shake 選取模式時抬到 dim（.screenSaver）之上，結束降回 floating。
     func setElevated(_ on: Bool) {
@@ -143,6 +157,14 @@ struct TranscriptView: View {
         .animation(.spring(response: 0.4, dampingFraction: 0.82), value: store.transcriptEmpty)
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: store.feed.count)
         .environment(\.openURL, OpenURLAction(handler: openFeedLink))
+        // 自動收合：shake / 打字 / agent / hover 續命；聲音不續命（那是 notch 的事）
+        .opacity(store.overlayShown ? 1 : 0)
+        .scaleEffect(store.overlayShown ? 1 : 0.96, anchor: .top)
+        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: store.overlayShown)
+        .onHover { hovering in
+            if hovering, store.overlayShown { store.touchOverlay() }
+        }
+        .onChange(of: input) { _, _ in store.touchOverlay() }
     }
 
     /// reply 裡的連結：http(s) 交給系統；相對路徑 / file 解析到 ~/.kilo 下用預設 app 開。

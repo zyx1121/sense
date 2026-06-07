@@ -45,7 +45,7 @@ final class LanguageRouter {
             if let c = r.confidence {
                 ema[r.locale] = alpha * c + (1 - alpha) * (ema[r.locale] ?? c)
             }
-            Telemetry.asr.info("final [\(r.locale, privacy: .public)] conf=\(r.confidence ?? -1, format: .fixed(precision: 2), privacy: .public) ema=\(self.ema[r.locale] ?? -1, format: .fixed(precision: 2), privacy: .public) chars=\(r.text.count, privacy: .public)")
+            Telemetry.asr.info("final [\(r.locale, privacy: .public)] conf=\(r.confidence ?? -1, format: .fixed(precision: 2), privacy: .public) ema=\(self.ema[r.locale] ?? -1, format: .fixed(precision: 2), privacy: .public) text=\(String(r.text.prefix(40)), privacy: .public)")
             maybeSwitch()
         }
 
@@ -62,6 +62,8 @@ final class LanguageRouter {
                 Telemetry.asr.info("final dropped (noise) [\(r.locale, privacy: .public)] conf=\(r.confidence ?? -1, format: .fixed(precision: 2), privacy: .public)")
                 return
             }
+            // 語音指令不在這裡 — 系統音訊是「世界的聲音」，影片喊 kilo 不能對 agent 下指令；
+            // 指令只走麥克風路（main.swift 的 mic pipeline + VoiceCommand）。
             captions.commitFinal(r.text)
             controller.appendFinal(r.text, locale: r.locale)
         } else {
@@ -69,6 +71,7 @@ final class LanguageRouter {
             controller.appendVolatile(r.text)
         }
     }
+
 
     /// 全局裁決：任何一筆 final 後，看分數最高的路是否該上位。
     /// 兩個實測教訓：

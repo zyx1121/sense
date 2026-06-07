@@ -67,6 +67,7 @@ final class ShakeCapture {
         clicker?.setEnabled(true)
         dim.show()
         onSelectingChange(true)
+        store.touchOverlay()  // shake = overlay 的展開手勢
         probeNow(at: NSEvent.mouseLocation, force: true)
         Telemetry.shake.info("selection begin")
     }
@@ -77,6 +78,7 @@ final class ShakeCapture {
         dim.hide()
         clicker?.setEnabled(false)
         onSelectingChange(false)
+        store.touchOverlay()  // 選取結束 overlay 留著，閒置計時重新起算
         Telemetry.shake.info("selection end attachments=\(self.store.attachments.count, privacy: .public)")
     }
 
