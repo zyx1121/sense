@@ -1,0 +1,62 @@
+name: Release
+
+# 推 tag v* → 簽名 + 公證 + DMG → 上傳 GitHub Release。
+# 複用 Makefile 的 release target（workflow 先把 cert / notary / DEV_ID_APP 就位，再 make release）。
+#
+# 需要的 repo secrets（Settings → Secrets and variables → Actions）：
+#   DEVELOPER_ID_P12_BASE64   Developer ID Application cert 匯出成 .p12 再 base64
+#                             （鑰匙圈 → 匯出 → .p12；base64 -i cert.p12 | pbcopy）
+#   DEVELOPER_ID_P12_PASSWORD 上面 .p12 的密碼
+#   DEV_ID_APP                "Developer ID Application: <Name> (<TEAMID>)"
+#   NOTARY_APPLE_ID           Apple ID email
+#   NOTARY_TEAM_ID            10 碼 Team ID
+#   NOTARY_PASSWORD           app-specific password（appleid.apple.com 生成）
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write   # gh release create
+
+jobs:
+  release:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Import Developer ID certificate
+        env:
+          P12_BASE64: ${{ secrets.DEVELOPER_ID_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+        run: |
+          KC=build.keychain
+          KCPW=$(uuidgen)
+          echo "$P12_BASE64" | base64 --decode > /tmp/cert.p12
+          security create-keychain -p "$KCPW" "$KC"
+          security default-keychain -s "$KC"
+          security unlock-keychain -p "$KCPW" "$KC"
+          security import /tmp/cert.p12 -k "$KC" -P "$P12_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KCPW" "$KC"
+          rm -f /tmp/cert.p12
+
+      - name: Notary credentials + Makefile.local
+        env:
+          AC_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          AC_TEAM: ${{ secrets.NOTARY_TEAM_ID }}
+          AC_PW: ${{ secrets.NOTARY_PASSWORD }}
+          DEV_ID: ${{ secrets.DEV_ID_APP }}
+        run: |
+          xcrun notarytool store-credentials kilo-notary \
+            --apple-id "$AC_ID" --team-id "$AC_TEAM" --password "$AC_PW"
+          printf 'DEV_ID_APP := %s\n' "$DEV_ID" > Makefile.local
+
+      - name: Build + sign + notarize + DMG
+        run: make release
+
+      - name: Publish DMG to Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" build/kilo-*.dmg \
+            --title "$GITHUB_REF_NAME" --generate-notes
