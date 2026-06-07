@@ -20,6 +20,14 @@ final class LanguageRouter {
     // margin=0.05：zh 模型亂拗英文仍有 ~0.6 自信，0.10 門檻實測跨不過
     private let margin = 0.05
 
+    // 等待切換期間被丟的 inactive finals — 切換時回補，語言交界的句子才不會蒸發
+    private var dropped: [String: [(text: String, conf: Double)]] = [:]
+    // 回補門檻 per-locale：buffer 低分的語義是「該路對外語的輸出」，分佈不同 —
+    // en 對中文垃圾 0.13–0.26（0.45 足擋，且撈得回 ~0.48 的邊界第一句）；
+    // zh 對英文亂拗 0.60–0.63（要 0.7 才擋得住）。都是真機實測值。
+    private let backfillConfidence: [String: Double] = ["zh-TW": 0.7, "en-US": 0.45]
+    private let backfillDefault = 0.7
+
     init(initial: String, captions: CaptionModel, controller: AgentController) {
         self.active = initial
         self.captions = captions
@@ -35,7 +43,13 @@ final class LanguageRouter {
             maybeSwitch()
         }
 
-        guard r.locale == active else { return }
+        guard r.locale == active else {
+            if r.isFinal {
+                dropped[r.locale, default: []].append((r.text, r.confidence ?? 0))
+                if dropped[r.locale]!.count > 12 { dropped[r.locale]!.removeFirst() }
+            }
+            return
+        }
         if r.isFinal {
             captions.commitFinal(r.text)
             controller.appendFinal(r.text)
@@ -57,5 +71,22 @@ final class LanguageRouter {
               best.value > cur + margin else { return }
         Telemetry.asr.info("language switch \(self.active, privacy: .public) → \(best.key, privacy: .public) (\(cur, format: .fixed(precision: 2), privacy: .public) vs \(best.value, format: .fixed(precision: 2), privacy: .public))")
         active = best.key
+        backfill()
+    }
+
+    /// EMA 爬升等切換的期間，新 active 路的句子已經被丟掉 — 把 buffer 裡
+    /// 信心達標的「尾段連續句」補回逐字稿（趨勢被低分筆打斷就停，垃圾分不會混進來）。
+    /// 只補逐字稿不補瀏海 — 字幕是當下的 UI，回放舊句很怪。
+    private func backfill() {
+        let bar = backfillConfidence[active] ?? backfillDefault
+        var run: [String] = []
+        for e in (dropped[active] ?? []).reversed() {
+            guard e.conf >= bar else { break }
+            run.append(e.text)
+        }
+        dropped[active] = []
+        guard !run.isEmpty else { return }
+        Telemetry.asr.info("backfill \(run.count, privacy: .public) finals after switch to \(self.active, privacy: .public)")
+        for text in run.reversed() { controller.appendFinal(text) }
     }
 }
