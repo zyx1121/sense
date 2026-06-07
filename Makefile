@@ -64,12 +64,17 @@ release: build
 	@cp Resources/AppIcon.icns $(CONTENTS)/Resources/AppIcon.icns
 	@codesign --force --options runtime --timestamp --sign "$(DEV_ID_APP)" $(APP_BUNDLE)
 	@codesign --verify --strict --verbose=2 $(APP_BUNDLE)
+	@echo "→ notarizing app（首次數分鐘）…"
+	@ditto -c -k --keepParent $(APP_BUNDLE) build/$(APP_NAME)-notarize.zip
+	@xcrun notarytool submit build/$(APP_NAME)-notarize.zip --keychain-profile "$(NOTARY_PROFILE)" --wait
+	@xcrun stapler staple $(APP_BUNDLE)   # ticket 釘進 app 本身 — 離線也過 Gatekeeper
+	@rm -f build/$(APP_NAME)-notarize.zip
 	@rm -f $(DMG)
 	@hdiutil create -volname "$(APP_NAME)" -srcfolder $(APP_BUNDLE) -ov -format UDZO $(DMG) >/dev/null
-	@echo "→ notarizing $(DMG)（首次數分鐘）…"
-	@xcrun notarytool submit $(DMG) --keychain-profile "$(NOTARY_PROFILE)" --wait
+	@echo "→ notarizing dmg…"
+	@xcrun notarytool submit $(DMG) --keychain-profile "$(NOTARY_PROFILE)" --wait   # DMG 自己也要 notarize 才能 staple
 	@xcrun stapler staple $(DMG)
-	@echo "[OK] notarized + stapled $(DMG)"
+	@echo "[OK] notarized + stapled（app + dmg）：$(DMG)"
 
 # 即時 Telemetry（asr / polish / agent / shake）
 logs:
