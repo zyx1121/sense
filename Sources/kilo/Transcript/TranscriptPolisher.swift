@@ -133,10 +133,10 @@ final class TranscriptPolisher {
         Task {
             do {
                 let cleaned = try await backend.polish(chunk: run.text, locale: run.locale, contextTail: tail)
-                store.commitPolished(cleaned.isEmpty ? run.text : cleaned, consumedSegments: run.segments)
+                store.commitPolished(cleaned.isEmpty ? run.text : cleaned, locale: run.locale, consumedSegments: run.segments)
                 Telemetry.polish.info("polished [\(run.locale, privacy: .public)] \(run.text.count, privacy: .public) -> \(cleaned.count, privacy: .public) chars")
             } catch {
-                store.commitPolished(run.text, consumedSegments: run.segments)  // 原文轉正，不卡顯示
+                store.commitPolished(run.text, locale: run.locale, consumedSegments: run.segments)  // 原文轉正，不卡顯示
                 Telemetry.polish.error("polish failed: \(error.localizedDescription, privacy: .public)")
             }
             running = false

@@ -143,15 +143,20 @@ final class TranscriptStore {
         return (first.locale, text, n, false)
     }
 
+    private var lastPolishedLocale: String?
+
     /// polisher 整理完一批：移掉消耗的段、整理後文字接上 polished。
-    /// 一句一行由這裡的確定性後處理保證（模型實測不穩定遵守）；
-    /// 前一批以句末標點收尾 → 換行接（語言切換的批次邊界自然斷行），否則視為斷句續接。
-    func commitPolished(_ cleaned: String, consumedSegments: Int) {
+    /// 段落空行由這裡的確定性後處理保證（模型實測不穩定遵守）；批次接合規則：
+    /// 換語言一律空行（語言切換必是新段 — 沒標點的雜訊批才不會把下一語言黏進同一行）、
+    /// 同語言看句末標點（有 → 空行；無 → 斷句續接）。
+    func commitPolished(_ cleaned: String, locale: String, consumedSegments: Int) {
         pending.removeFirst(min(consumedSegments, pending.count))
         let c = breakLines(trimOverlap(cleaned.trimmingCharacters(in: .whitespacesAndNewlines)))
         guard !c.isEmpty else { return }
         let sentenceEnd = polished.last.map { "。！？.!?…".contains($0) } ?? false
-        polished = polished.isEmpty ? c : (sentenceEnd ? polished + "\n\n" + c : glue(polished, c))
+        let langChanged = lastPolishedLocale != nil && lastPolishedLocale != locale
+        polished = polished.isEmpty ? c : ((sentenceEnd || langChanged) ? polished + "\n\n" + c : glue(polished, c))
+        lastPolishedLocale = locale
         if polished.count > 12000 { polished = String(polished.suffix(9000)) }
     }
 

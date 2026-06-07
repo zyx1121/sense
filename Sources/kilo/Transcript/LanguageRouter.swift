@@ -27,6 +27,12 @@ final class LanguageRouter {
     // zh 對英文亂拗 0.60–0.63（要 0.7 才擋得住）。都是真機實測值。
     private let backfillConfidence: [String: Double] = ["zh-TW": 0.7, "en-US": 0.45]
     private let backfillDefault = 0.7
+    // 切換資格：candidate EMA 要夠高才配上位 — 靜音期兩路垃圾分（0.3 vs 0.4）互比也會過
+    // margin，但那不是語言切換，是雜訊打架（實測翻車：垃圾切走後真句被 drop）
+    private let switchEligibility = 0.6
+    // 逐字稿門檻：active 路的 final 低於此視為環境雜訊，不進逐字稿（仍餵 EMA）。
+    // 實測分佈：真句 0.78+、語言邊界髒句 0.48+、垃圾 ≤0.44
+    private let transcriptConfidence = 0.45
 
     init(initial: String, captions: CaptionModel, controller: AgentController) {
         self.active = initial
@@ -51,6 +57,11 @@ final class LanguageRouter {
             return
         }
         if r.isFinal {
+            // 環境雜訊（低 conf）不進逐字稿 — 靜音期的「回答了」類孤兒就是這樣來的
+            guard (r.confidence ?? 1) >= transcriptConfidence else {
+                Telemetry.asr.info("final dropped (noise) [\(r.locale, privacy: .public)] conf=\(r.confidence ?? -1, format: .fixed(precision: 2), privacy: .public)")
+                return
+            }
             captions.commitFinal(r.text)
             controller.appendFinal(r.text, locale: r.locale)
         } else {
@@ -68,25 +79,23 @@ final class LanguageRouter {
         guard let cur = ema[active],
               let best = ema.max(by: { $0.value < $1.value }),
               best.key != active,
+              best.value >= switchEligibility,   // 垃圾分打架不算語言切換
               best.value > cur + margin else { return }
         Telemetry.asr.info("language switch \(self.active, privacy: .public) → \(best.key, privacy: .public) (\(cur, format: .fixed(precision: 2), privacy: .public) vs \(best.value, format: .fixed(precision: 2), privacy: .public))")
         active = best.key
         backfill()
     }
 
-    /// EMA 爬升等切換的期間，新 active 路的句子已經被丟掉 — 把 buffer 裡
-    /// 信心達標的「尾段連續句」補回逐字稿（趨勢被低分筆打斷就停，垃圾分不會混進來）。
+    /// EMA 爬升等切換的期間，新 active 路的句子已經被丟掉 — buffer 裡 conf 達標的
+    /// 全部依序補回逐字稿。逐筆過濾而非連續尾段：真句（0.9+）可能排在亂拗筆（0.6x）
+    /// 之前，連續性要求會把它斷在外面（實測整句蒸發）；per-locale bar 本來就擋得住垃圾。
     /// 只補逐字稿不補瀏海 — 字幕是當下的 UI，回放舊句很怪。
     private func backfill() {
         let bar = backfillConfidence[active] ?? backfillDefault
-        var run: [String] = []
-        for e in (dropped[active] ?? []).reversed() {
-            guard e.conf >= bar else { break }
-            run.append(e.text)
-        }
+        let run = (dropped[active] ?? []).filter { $0.conf >= bar }.map(\.text)
         dropped[active] = []
         guard !run.isEmpty else { return }
         Telemetry.asr.info("backfill \(run.count, privacy: .public) finals after switch to \(self.active, privacy: .public)")
-        for text in run.reversed() { controller.appendFinal(text, locale: active) }
+        for text in run { controller.appendFinal(text, locale: active) }
     }
 }
