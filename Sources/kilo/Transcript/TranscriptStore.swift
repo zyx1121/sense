@@ -151,12 +151,12 @@ final class TranscriptStore {
         let c = breakLines(trimOverlap(cleaned.trimmingCharacters(in: .whitespacesAndNewlines)))
         guard !c.isEmpty else { return }
         let sentenceEnd = polished.last.map { "。！？.!?…".contains($0) } ?? false
-        polished = polished.isEmpty ? c : (sentenceEnd ? polished + "\n" + c : glue(polished, c))
+        polished = polished.isEmpty ? c : (sentenceEnd ? polished + "\n\n" + c : glue(polished, c))
         if polished.count > 12000 { polished = String(polished.suffix(9000)) }
     }
 
     /// 句末標點後斷行：中文「。！？」直接斷；英文「. ! ?」後接空格才斷（"U.S. Army" 會誤斷，接受）。
-    /// 模型自己給的換行保留，不重複加。
+    /// 最後統一成「段落間空一行」（\n\n）— 模型自己給的換行也一併正規化，鬆緊一致。
     private func breakLines(_ s: String) -> String {
         let chars = Array(s)
         var out = String()
@@ -176,7 +176,10 @@ final class TranscriptStore {
             }
             i += 1
         }
-        return out
+        return out.components(separatedBy: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n\n")
     }
 
     /// 小模型偶爾把「前文參考」照抄進輸出 — 拿 polished 結尾跟新輸出開頭做
