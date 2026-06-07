@@ -11,7 +11,7 @@
 
 > macOS 感官 agent — 聽見你在聽的、看見你指的，即時轉錄、整理、分析、記錄。
 
-`SpeechAnalyzer` · `ScreenCaptureKit` · `codex` · `FoundationModels` · `shake-to-capture`
+`SpeechAnalyzer` · `ScreenCaptureKit` · `codex` · `gpt-5.4-mini` · `shake-to-capture`
 
 ## 它做什麼
 
@@ -28,7 +28,7 @@
 ```
 系統音訊 (ScreenCaptureKit) ─→ SpeechAnalyzer ─→ 瀏海字幕 (volatile/final)
                                       │
-                                      └→ 連續逐字稿 ─→ 小模型整理 (FoundationModels / gpt-5.4-nano)
+                                      └→ 連續逐字稿 ─→ 小模型整理 (gpt-5.4-mini)
                                                             │
 晃游標 ─→ dim + AX spotlight ─→ 點擊圈選 ──── chips ──────→ codex exec（resume session）─→ feed
 ```
@@ -43,13 +43,13 @@ make logs      # 即時看 Telemetry（asr / polish / agent / shake）
 
 需求：
 
-- **macOS 26+**（SpeechAnalyzer、FoundationModels）
+- **macOS 26+**（SpeechAnalyzer）
 - **Apple Development cert** — hash 放 `Makefile.local` 的 `SIGN_ID`（gitignored），沒有就 ad-hoc 簽
 - **codex CLI** 在 PATH（agent 引擎；`zsh -lc` 載入，fnm shim 也通）
 - **OpenAI key** 在 Keychain（`service=kilo account=openai`）— agent 與逐字稿整理的 fallback 用；沒有 key 字幕與逐字稿照常，agent 停用
 - 權限：**螢幕錄製**（系統音訊 + 圈選截圖）、**輔助使用**（shake 的元素探測與點擊攔截），首次啟動會提示
 
-逐字稿整理模型自動選：Apple Intelligence 有開 → on-device FoundationModels（免費本地）；沒開 → `gpt-5.4-nano` 直打 API；都沒有 → 原文直出。
+逐字稿整理走 `gpt-5.4-mini` 直打 API（沒 OpenAI key → 原文直出，不整理）。
 
 ```bash
 ./build/kilo.app/Contents/MacOS/kilo --langs zh-TW,en-US   # 雙路信心擇優（預設）

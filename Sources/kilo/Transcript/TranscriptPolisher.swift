@@ -1,5 +1,4 @@
 import Foundation
-import FoundationModels
 
 // 指令（含前文參考）全放 system / instructions，user message 只放純 raw 文字 —
 // 小模型會把混在 user message 裡的 scaffold 標記與「前文參考」當內文照抄（nano 實測翻車）。
@@ -36,31 +35,67 @@ private func composeInstructions(locale: String, contextTail: String) -> String 
     return base + ref + contextTail
 }
 
-protocol PolishBackend: Sendable {
-    var name: String { get }
-    func polish(chunk: String, locale: String, contextTail: String) async throws -> String
-}
+/// 小模型即時整理逐字稿：pendingRaw 滿 60 字立刻整理、不滿則 4s idle 後整理；
+/// 一次一個 in-flight，失敗就原文轉正不卡流。沒 OpenAI key → 整理關閉（raw 留在 pendingRaw）。
+/// 整理走 gpt-5.4-mini 直打 API（不走 codex exec，省 22k token 的 agent prompt）。
+/// 不用 on-device FoundationModels：實測錯字修正明顯較差（只修指令例子教過的、英文偏保守），
+/// 且需 Apple Intelligence 啟用（Mac 與 Siri 同語言）— 純退步，移除。
+@MainActor
+final class TranscriptPolisher {
+    private let store: TranscriptStore
+    private let archiver: TranscriptArchiver
+    private let apiKey: String?
+    private let model = "gpt-5.4-mini"
+    private var running = false
+    private var idleTask: Task<Void, Never>?
 
-/// on-device Apple Intelligence — 免費、本地、無網路。每次開新 session 避免 4k context 累積爆掉。
-struct FoundationModelBackend: PolishBackend {
-    let name = "on-device"
+    var backendName: String { apiKey == nil ? "無（原文直出）" : model }
 
-    func polish(chunk: String, locale: String, contextTail: String) async throws -> String {
-        let session = LanguageModelSession(
-            instructions: composeInstructions(locale: locale, contextTail: contextTail))
-        let r = try await session.respond(to: chunk)
-        return r.content.trimmingCharacters(in: .whitespacesAndNewlines)
+    init(store: TranscriptStore, archiver: TranscriptArchiver) {
+        self.store = store
+        self.archiver = archiver
+        self.apiKey = Keychain.openAIKey()
     }
-}
 
-/// OpenAI fallback — Apple Intelligence 沒開時直打 API（不走 codex exec，省 22k token 的 agent prompt）。
-/// mini 不用 nano：錯字修正實測差距明顯（nano 只修指令例子教過的，mini 能依語境修同類錯）。
-struct OpenAIPolishBackend: PolishBackend {
-    let apiKey: String
-    var model = "gpt-5.4-mini"
-    var name: String { model }
+    /// 每段 final 進來後呼叫。批次 = 開頭同語言的連續段：
+    /// 滿 60 字立刻整理；語言切換點（boundary）不等湊字數直接沖；其他 4s idle 後整理。
+    func nudge() {
+        guard apiKey != nil, !running else { return }
+        guard let run = store.firstPendingRun() else { return }
+        if run.text.count >= 60 || run.boundary { kick(); return }
+        idleTask?.cancel()
+        idleTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(4))
+            guard let self, !Task.isCancelled else { return }
+            kick()
+        }
+    }
 
-    func polish(chunk: String, locale: String, contextTail: String) async throws -> String {
+    private func kick() {
+        guard apiKey != nil, !running else { return }
+        guard let run = store.firstPendingRun() else { return }
+        running = true
+        idleTask?.cancel()
+        let tail = String(store.polished.suffix(120))
+        Task {
+            var committed: String?
+            do {
+                let cleaned = try await polish(chunk: run.text, locale: run.locale, contextTail: tail)
+                committed = store.commitPolished(cleaned.isEmpty ? run.text : cleaned, locale: run.locale, consumedSegments: run.segments)
+                Telemetry.polish.info("polished [\(run.locale, privacy: .public)] \(run.text.count, privacy: .public) -> \(cleaned.count, privacy: .public) chars")
+            } catch {
+                committed = store.commitPolished(run.text, locale: run.locale, consumedSegments: run.segments)  // 原文轉正，不卡顯示
+                Telemetry.polish.error("polish failed: \(error.localizedDescription, privacy: .public)")
+            }
+            if let committed { archiver.append(committed, source: run.source) }  // 持久化（整理後的定稿）
+            running = false
+            nudge()  // 積壓續跑 / 重設 idle timer
+        }
+    }
+
+    /// gpt-5.4-mini 直打 chat completions：system 放指令、user 只放 raw chunk。
+    private func polish(chunk: String, locale: String, contextTail: String) async throws -> String {
+        guard let apiKey else { return chunk }
         var req = URLRequest(url: URL(string: "https://api.openai.com/v1/chat/completions")!)
         req.httpMethod = "POST"
         req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
@@ -85,66 +120,5 @@ struct OpenAIPolishBackend: PolishBackend {
                           userInfo: [NSLocalizedDescriptionKey: "polish API error: \(body.prefix(200))"])
         }
         return content.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-}
-
-/// 小模型即時整理逐字稿：pendingRaw 滿 60 字立刻整理、不滿則 4s idle 後整理；
-/// 一次一個 in-flight，失敗就原文轉正不卡流。backend 不可用 → 整理關閉（raw 留在 pendingRaw）。
-@MainActor
-final class TranscriptPolisher {
-    private let store: TranscriptStore
-    private let archiver: TranscriptArchiver
-    private let backend: PolishBackend?
-    private var running = false
-    private var idleTask: Task<Void, Never>?
-
-    var backendName: String { backend?.name ?? "無（原文直出）" }
-
-    init(store: TranscriptStore, archiver: TranscriptArchiver) {
-        self.store = store
-        self.archiver = archiver
-        if SystemLanguageModel.default.isAvailable {
-            backend = FoundationModelBackend()
-        } else if let key = Keychain.openAIKey() {
-            backend = OpenAIPolishBackend(apiKey: key)
-        } else {
-            backend = nil
-        }
-    }
-
-    /// 每段 final 進來後呼叫。批次 = 開頭同語言的連續段：
-    /// 滿 60 字立刻整理；語言切換點（boundary）不等湊字數直接沖；其他 4s idle 後整理。
-    func nudge() {
-        guard backend != nil, !running else { return }
-        guard let run = store.firstPendingRun() else { return }
-        if run.text.count >= 60 || run.boundary { kick(); return }
-        idleTask?.cancel()
-        idleTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(4))
-            guard let self, !Task.isCancelled else { return }
-            kick()
-        }
-    }
-
-    private func kick() {
-        guard let backend, !running else { return }
-        guard let run = store.firstPendingRun() else { return }
-        running = true
-        idleTask?.cancel()
-        let tail = String(store.polished.suffix(120))
-        Task {
-            var committed: String?
-            do {
-                let cleaned = try await backend.polish(chunk: run.text, locale: run.locale, contextTail: tail)
-                committed = store.commitPolished(cleaned.isEmpty ? run.text : cleaned, locale: run.locale, consumedSegments: run.segments)
-                Telemetry.polish.info("polished [\(run.locale, privacy: .public)] \(run.text.count, privacy: .public) -> \(cleaned.count, privacy: .public) chars")
-            } catch {
-                committed = store.commitPolished(run.text, locale: run.locale, consumedSegments: run.segments)  // 原文轉正，不卡顯示
-                Telemetry.polish.error("polish failed: \(error.localizedDescription, privacy: .public)")
-            }
-            if let committed { archiver.append(committed, source: run.source) }  // 持久化（整理後的定稿）
-            running = false
-            nudge()  // 積壓續跑 / 重設 idle timer
-        }
     }
 }
