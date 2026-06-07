@@ -139,7 +139,7 @@ struct TranscriptView: View {
                 .background(.white.opacity(0.04))
             }
 
-            // 指令輸入 → codex agent
+            // 指令輸入 → codex agent；相機 = 截游標所在螢幕變 chip
             HStack(spacing: 8) {
                 Image(systemName: "sparkle")
                     .font(.system(size: 11)).foregroundStyle(.white.opacity(0.4))
@@ -147,6 +147,14 @@ struct TranscriptView: View {
                     .textFieldStyle(.plain).font(.system(size: 12)).foregroundStyle(.white)
                     .onSubmit { controller.submit(input); input = "" }
                 if store.thinking { ProgressView().controlSize(.small) }
+                Button {
+                    controller.captureScreen()
+                } label: {
+                    Image(systemName: "camera.viewfinder")
+                        .font(.system(size: 12)).foregroundStyle(.white.opacity(0.45))
+                }
+                .buttonStyle(.plain)
+                .help("截整個螢幕給 Kilo 看")
             }
             .padding(.horizontal, 14).padding(.vertical, 9)
             .background(.white.opacity(0.06))
@@ -268,6 +276,15 @@ struct TranscriptView: View {
         .padding(4)
         .background(.white.opacity(0.07), in: .rect(cornerRadius: 7))
         .help(asset.source)
+        .contextMenu {
+            Button("翻譯") { controller.quickAction(.translate, on: asset) }
+            Button("解釋") { controller.quickAction(.explain, on: asset) }
+            if case .image = asset.kind {
+                Button("抄錄文字") { controller.quickAction(.transcribe, on: asset) }
+            }
+            Divider()
+            Button("移除") { store.removeAttachment(asset) }
+        }
     }
 
     private func copyText(_ s: String) {

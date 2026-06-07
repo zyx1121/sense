@@ -25,10 +25,18 @@ struct CodexAgent: Sendable {
                 images: [String] = []) -> AsyncThrowingStream<CodexEvent, Error> {
         let (events, cont) = AsyncThrowingStream<CodexEvent, Error>.makeStream()
 
+        // workspace 導覽只在 fresh session 給 — resume 時 codex 記得，不重複燒 token。
+        // 這段讓「上週看的那個影片講什麼」答得出來：歷史逐字稿就在它的 workspace。
+        let orientation = threadID == nil
+            ? "（你的 workspace ~/.kilo：transcripts/YYYY-MM-DD.md 是逐字稿歷史（含時間與來源標題）、"
+                + "notes/ 是你寫過的筆記、captures/ 是使用者圈選的截圖。"
+                + "被問到「之前 / 上週 / 那個影片」這類過去的事，先 grep transcripts 再回答。）\n\n"
+            : ""
+
         // 逐字稿包進 prompt（resume 時 codex 記得舊的，但新語音只在這份 tail 裡）
         let prompt = transcript.isEmpty
-            ? instruction
-            : "\(instruction)\n\n（最新逐字稿片段，可能與前次部分重疊）\n\(transcript)"
+            ? orientation + instruction
+            : "\(orientation)\(instruction)\n\n（最新逐字稿片段，可能與前次部分重疊）\n\(transcript)"
 
         // 截圖走 -i（fresh / resume 都收）；path 是自家產的 ~/.kilo/captures/*.png，單引號包安全
         let imageFlags = images.map { "-i '\($0)'" }.joined(separator: " ")

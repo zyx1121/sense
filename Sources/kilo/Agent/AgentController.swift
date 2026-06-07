@@ -1,4 +1,26 @@
+import AppKit
 import Foundation
+
+/// 圈選素材的快捷動作（chip 右鍵選單）。
+enum QuickAction {
+    case translate, explain, transcribe
+
+    var label: String {
+        switch self {
+        case .translate: return "翻譯"
+        case .explain: return "解釋"
+        case .transcribe: return "抄錄文字"
+        }
+    }
+
+    var instruction: String {
+        switch self {
+        case .translate: return "翻譯這個圈選內容：中文翻成英文、其他語言翻成繁體中文。只給譯文。"
+        case .explain: return "解釋這個圈選內容：它是什麼、重點是什麼。繁體中文，簡潔。"
+        case .transcribe: return "把圖中的文字完整抄錄出來，保持原語言與排版。"
+        }
+    }
+}
 
 /// overlay input → codex agent。逐字稿存在 TranscriptStore（也是 codex 的 context）。
 /// 對話 history：記住 codex 的 thread id，每輪 `exec resume` 續同一個 session。
@@ -9,6 +31,7 @@ final class AgentController {
     private let metrics: MetricsStore
     private let polisher: TranscriptPolisher
     private let sources = SourceTracker()
+    private let screenCapturer = Capturer()
     private var threadID: String?  // codex session，app 重啟歸零
 
     /// router 的語音指令路徑需要知道 agent 是否忙著（忙著就當一般逐字稿）。
@@ -34,19 +57,49 @@ final class AgentController {
         polisher.nudge()
     }
 
-    /// 使用者在 overlay 打的指令 → codex（連同最近逐字稿 + shake 圈選素材）。事件邊到邊進 feed。
+    /// 使用者在 overlay 打的指令 → codex（連同最近逐字稿 + 全部圈選素材，送出即消耗）。
     func submit(_ instruction: String) {
         let instruction = instruction.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !instruction.isEmpty, !store.thinking else { return }  // turn-at-a-time
-        store.beginTurn(instruction)
+        guard !instruction.isEmpty else { return }
+        let attachments = store.attachments
+        store.clearAttachments()
+        run(instruction: instruction, attachments: attachments, label: instruction)
+    }
+
+    /// chip 快捷動作：只消耗那一顆 chip。
+    func quickAction(_ action: QuickAction, on asset: Asset) {
+        store.removeAttachment(asset)
+        run(instruction: action.instruction, attachments: [asset],
+            label: "\(action.label)（\(asset.typeLabel == "image" ? "截圖" : "圈選文字")）")
+    }
+
+    /// 截「游標所在的螢幕」整幅 → 變成一顆 chip（不自動送出，可疊指令、跟其他 chip 組合）。
+    func captureScreen() {
+        Task {
+            let mouse = NSEvent.mouseLocation
+            guard let screen = NSScreen.screens.first(where: { NSMouseInRect(mouse, $0.frame, false) })
+                ?? NSScreen.main else { return }
+            let primaryH = (NSScreen.screens.first { $0.frame.origin == .zero } ?? screen).frame.height
+            let f = screen.frame
+            var info = OverlayInfo()
+            info.app = "螢幕截圖"
+            info.frame = CGRect(x: f.origin.x, y: primaryH - f.maxY, width: f.width, height: f.height)
+            if let asset = await screenCapturer.capture(info: info) {
+                store.addAttachment(asset)
+                Telemetry.shake.info("full-screen capture added")
+            }
+        }
+    }
+
+    /// 組裝 + 跑一輪：文字素材進 prompt、截圖存檔走 -i。
+    private func run(instruction: String, attachments: [Asset], label: String) {
+        guard !store.thinking else { return }  // turn-at-a-time
+        store.beginTurn(label)
         guard let agent else {
             store.appendError("沒有 codex agent（缺 OpenAI key）")
             return
         }
 
-        // shake 圈選素材：文字進 prompt、截圖存檔走 -i；送出即消耗
-        let attachments = store.attachments
-        store.clearAttachments()
         var fullInstruction = instruction
         let texts = attachments.compactMap { a -> String? in
             guard case .text(let s) = a.kind else { return nil }
