@@ -37,9 +37,21 @@
 
 ```bash
 make run       # build + bundle + codesign + open
+make install   # 裝進 /Applications（開機自啟與穩定 TCC 都需要）
 make locales   # dump SpeechTranscriber 支援語言
 make logs      # 即時看 Telemetry（asr / polish / agent / shake）
 ```
+
+裝好後選單列會有 sparkle 圖示 — 開逐字稿資料夾、權限設定、開機自啟、重啟、結束都在那。
+
+## 分發（給別人）
+
+```bash
+make dmg       # 開發態 app 打成 DMG（對方需「右鍵 → 打開」繞過 Gatekeeper）
+make release   # Developer ID 簽 + Apple 公證 + DMG，對方雙擊即裝
+```
+
+`release` 一次性前置：Apple Developer Program 簽發 **Developer ID Application** cert、`xcrun notarytool store-credentials kilo-notary …` 存公證憑證、`Makefile.local` 設 `DEV_ID_APP`（見 Makefile `release` 註解）。
 
 需求：
 
