@@ -1,5 +1,33 @@
 import AppKit
 import ServiceManagement
+import SwiftUI
+
+/// app 的品牌 mark（zyx logo），跟 app icon 同一個形狀 — 取代 SF Symbol sparkle。
+/// template NSImage：狀態欄自動明暗、SwiftUI 端用 foregroundStyle 染色。
+enum Brand {
+    static let mark: NSImage = {
+        if let p = Bundle.main.path(forResource: "KiloMark", ofType: "png"),
+           let img = NSImage(contentsOfFile: p) {
+            img.isTemplate = true
+            return img
+        }
+        let fallback = NSImage(systemSymbolName: "sparkle", accessibilityDescription: "Kilo") ?? NSImage()
+        fallback.isTemplate = true
+        return fallback
+    }()
+}
+
+/// feed / 輸入框用的品牌 mark，可 .foregroundStyle 染色、保持比例。
+struct KiloMark: View {
+    var size: CGFloat
+    var body: some View {
+        Image(nsImage: Brand.mark)
+            .resizable()
+            .renderingMode(.template)
+            .aspectRatio(contentMode: .fit)
+            .frame(width: size, height: size)
+    }
+}
 
 /// 選單列入口 — LSUIElement app 沒有 Dock 圖示，這是唯一能控制 app 的地方
 /// （在這之前要關只能 pkill）。sparkle 呼應 app 內視覺語言。
@@ -9,8 +37,10 @@ final class StatusBarController: NSObject {
 
     override init() {
         super.init()
-        item.button?.image = NSImage(systemSymbolName: "sparkle", accessibilityDescription: "Kilo")
-        item.button?.image?.isTemplate = true  // 跟著選單列明暗
+        let mark = Brand.mark.copy() as! NSImage
+        mark.size = NSSize(width: 18, height: 18 * mark.size.height / mark.size.width)  // 狀態欄高度
+        mark.isTemplate = true  // 跟著選單列明暗
+        item.button?.image = mark
         rebuildMenu()
     }
 

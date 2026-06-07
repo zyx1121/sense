@@ -144,8 +144,8 @@ struct TranscriptView: View {
 
             // 指令輸入 → codex agent；相機 = 截游標所在螢幕變 chip
             HStack(spacing: 8) {
-                Image(systemName: "sparkle")
-                    .font(.system(size: 11)).foregroundStyle(.white.opacity(0.45))
+                KiloMark(size: 12)
+                    .foregroundStyle(.white.opacity(0.45))
                     .frame(width: iconGutter)  // 跟 feed step 的 icon 對齊同一條垂直線
                 TextField("問 Kilo，或叫它記錄…", text: $input)
                     .textFieldStyle(.plain).font(.system(size: 12)).foregroundStyle(.white)
@@ -227,7 +227,7 @@ struct TranscriptView: View {
     private func stepIcon(_ step: AgentStep) -> some View {
         switch step.kind {
         case .user:
-            Image(systemName: "sparkle").font(.system(size: 11)).foregroundStyle(.white.opacity(0.45))
+            KiloMark(size: 12).foregroundStyle(.white.opacity(0.45))
         case .tool:
             if step.running {
                 ProgressView().controlSize(.mini)
@@ -237,8 +237,8 @@ struct TranscriptView: View {
                     .foregroundStyle(step.failed ? .red.opacity(0.8) : .white.opacity(0.35))
             }
         case .reply:
-            // Kilo 說話的標記（cyan），跟 user 的灰 sparkle 形成你問它答的對話節奏
-            Image(systemName: "sparkle").font(.system(size: 11)).foregroundStyle(.cyan.opacity(0.9))
+            // Kilo 說話的標記（cyan），跟 user 的灰 mark 形成你問它答的對話節奏
+            KiloMark(size: 12).foregroundStyle(.cyan.opacity(0.9))
         case .error:
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 10)).foregroundStyle(.orange.opacity(0.9))

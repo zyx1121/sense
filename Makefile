@@ -31,6 +31,7 @@ bundle: build
 	@cp $(BIN_PATH) $(CONTENTS)/MacOS/$(APP_NAME)
 	@cp Resources/Info.plist $(CONTENTS)/Info.plist
 	@cp Resources/AppIcon.icns $(CONTENTS)/Resources/AppIcon.icns
+	@cp Resources/KiloMark.png $(CONTENTS)/Resources/KiloMark.png
 	@codesign --force --options runtime --sign $(SIGN_ID) $(APP_BUNDLE)
 	@echo "[OK] $(APP_BUNDLE) signed with $(SIGN_ID)"
 
@@ -60,6 +61,7 @@ release: build
 	@cp $(BIN_PATH) $(CONTENTS)/MacOS/$(APP_NAME)
 	@cp Resources/Info.plist $(CONTENTS)/Info.plist
 	@cp Resources/AppIcon.icns $(CONTENTS)/Resources/AppIcon.icns
+	@cp Resources/KiloMark.png $(CONTENTS)/Resources/KiloMark.png
 	@codesign --force --options runtime --timestamp --sign "$(DEV_ID_APP)" $(APP_BUNDLE)
 	@codesign --verify --strict --verbose=2 $(APP_BUNDLE)
 	@echo "→ notarizing app（首次數分鐘）…"
