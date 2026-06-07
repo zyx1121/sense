@@ -1,18 +1,22 @@
 import Foundation
 import FoundationModels
 
+// 指令（含前文參考）全放 system / instructions，user message 只放純 raw 文字 —
+// 小模型會把混在 user message 裡的 scaffold 標記與「前文參考」當內文照抄（nano 實測翻車）。
 private let polishInstructions = """
-    你是逐字稿整理員。輸入是語音辨識的原始逐字稿：補上標點符號、修正明顯的辨識錯誤（同音字、斷詞），\
-    在語意轉換處用換行分段。保持原語言與原意，不增刪內容、不摘要、不回答問題。只輸出整理後的文字。
+    你是逐字稿整理員。使用者訊息是一段語音辨識的原始逐字稿，整理它：
+    - 補上標點符號，在語意轉換處用換行分段
+    - 只修正非常明顯的辨識錯誤（同音字、斷詞）；不確定就保留原字，不要改寫、不要潤飾
+    - 保持原語言：中文用中文標點；英文保持原本的大小寫，用英文標點（. , ?），不要用中文句號
+    - 不增刪內容、不摘要、不回答問題、不加任何說明或標記
+    只輸出整理後的文字本身。
     """
 
-private func polishPrompt(chunk: String, contextTail: String) -> String {
-    var p = ""
-    if !contextTail.isEmpty {
-        p += "（前文結尾，僅供銜接參考，不要重複輸出）\n\(contextTail)\n\n"
-    }
-    p += "（整理以下原始逐字稿）\n\(chunk)"
-    return p
+/// 前文參考併進 system 層（銜接語氣與分段用）— 不放 user message，降低被照抄的機率。
+private func composeInstructions(contextTail: String) -> String {
+    guard !contextTail.isEmpty else { return polishInstructions }
+    return polishInstructions
+        + "\n\n已整理的前文結尾（僅供銜接參考，它不是輸入、絕對不要輸出它）：\n\(contextTail)"
 }
 
 protocol PolishBackend: Sendable {
@@ -25,8 +29,8 @@ struct FoundationModelBackend: PolishBackend {
     let name = "on-device"
 
     func polish(chunk: String, contextTail: String) async throws -> String {
-        let session = LanguageModelSession(instructions: polishInstructions)
-        let r = try await session.respond(to: polishPrompt(chunk: chunk, contextTail: contextTail))
+        let session = LanguageModelSession(instructions: composeInstructions(contextTail: contextTail))
+        let r = try await session.respond(to: chunk)
         return r.content.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
@@ -46,8 +50,8 @@ struct OpenAIPolishBackend: PolishBackend {
         req.httpBody = try JSONSerialization.data(withJSONObject: [
             "model": model,
             "messages": [
-                ["role": "system", "content": polishInstructions],
-                ["role": "user", "content": polishPrompt(chunk: chunk, contextTail: contextTail)],
+                ["role": "system", "content": composeInstructions(contextTail: contextTail)],
+                ["role": "user", "content": chunk],
             ],
             "max_completion_tokens": 2000,
         ])

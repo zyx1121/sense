@@ -120,10 +120,25 @@ final class TranscriptStore {
     /// polisher 整理完一個 chunk：從 pendingRaw 頭部移掉 consumed 字、整理後文字接上 polished。
     func commitPolished(_ cleaned: String, consumed: Int) {
         pendingRaw = String(pendingRaw.dropFirst(min(consumed, pendingRaw.count)))
-        let c = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+        let c = trimOverlap(cleaned.trimmingCharacters(in: .whitespacesAndNewlines))
         guard !c.isEmpty else { return }
         polished = polished.isEmpty ? c : glue(polished, c)
         if polished.count > 12000 { polished = String(polished.suffix(9000)) }
+    }
+
+    /// 小模型偶爾把「前文參考」照抄進輸出 — 拿 polished 結尾跟新輸出開頭做
+    /// suffix-prefix overlap，重疊 ≥8 字就裁掉（防重複句的程式碼層防線）。
+    private func trimOverlap(_ incoming: String) -> String {
+        let tail = String(polished.suffix(200))
+        guard !tail.isEmpty, !incoming.isEmpty else { return incoming }
+        var len = min(tail.count, incoming.count)
+        while len >= 8 {
+            if tail.hasSuffix(String(incoming.prefix(len))) {
+                return String(incoming.dropFirst(len)).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            len -= 1
+        }
+        return incoming
     }
 
     /// 打字機：volatileShown 逐字推進到 target（25ms/字）；辨識回頭改字就直接對齊。
