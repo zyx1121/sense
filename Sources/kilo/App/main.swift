@@ -39,8 +39,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var summaryWindow: SummaryWindow?
     private var agentController: AgentController?
     private var shakeCapture: ShakeCapture?
+    private var statusBar: StatusBarController?
 
     func applicationDidFinishLaunching(_: Notification) {
+        statusBar = StatusBarController()  // 選單列入口（控制 app 的唯一處）
         showOverlay()
         showSummaryWindow()
         startShakeCapture()

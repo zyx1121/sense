@@ -8,6 +8,8 @@
 	<string>kilo</string>
 	<key>CFBundleExecutable</key>
 	<string>kilo</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
 	<key>CFBundleDisplayName</key>
 	<string>Kilo</string>
 	<key>CFBundlePackageType</key>
