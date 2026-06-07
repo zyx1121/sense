@@ -45,11 +45,9 @@ install: bundle
 	@cp -R $(APP_BUNDLE) /Applications/
 	@echo "[OK] installed to /Applications/$(APP_NAME).app"
 
-# 打 DMG（開發態 app；分發用走 release）
+# 打 DMG（拖放佈局；開發態 app，分發用走 release）
 dmg: bundle
-	@rm -f $(DMG)
-	@hdiutil create -volname "$(APP_NAME)" -srcfolder $(APP_BUNDLE) -ov -format UDZO $(DMG) >/dev/null
-	@echo "[OK] $(DMG)"
+	@bash scripts/make-dmg.sh $(APP_BUNDLE) $(DMG) Resources/dmg-background.tiff
 
 # 完整分發：Developer ID 簽 + notarize + staple + DMG。
 # 前置（一次性）：① Apple Developer Program 簽發 Developer ID Application cert 並安裝
@@ -69,8 +67,7 @@ release: build
 	@xcrun notarytool submit build/$(APP_NAME)-notarize.zip --keychain-profile "$(NOTARY_PROFILE)" --wait
 	@xcrun stapler staple $(APP_BUNDLE)   # ticket 釘進 app 本身 — 離線也過 Gatekeeper
 	@rm -f build/$(APP_NAME)-notarize.zip
-	@rm -f $(DMG)
-	@hdiutil create -volname "$(APP_NAME)" -srcfolder $(APP_BUNDLE) -ov -format UDZO $(DMG) >/dev/null
+	@bash scripts/make-dmg.sh $(APP_BUNDLE) $(DMG) Resources/dmg-background.tiff
 	@echo "→ notarizing dmg…"
 	@xcrun notarytool submit $(DMG) --keychain-profile "$(NOTARY_PROFILE)" --wait   # DMG 自己也要 notarize 才能 staple
 	@xcrun stapler staple $(DMG)
