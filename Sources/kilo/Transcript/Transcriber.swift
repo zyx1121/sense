@@ -55,7 +55,7 @@ final class Transcriber {
         if let contextualStrings {
             let ctx = AnalysisContext()
             ctx.contextualStrings = [.general: contextualStrings]
-            try await analyzer.setContext(ctx)
+            try await analyzer.setContext(ctx)  // start 前設一次
         }
 
         try await ensureModel(transcriber: transcriber, locale: locale)
@@ -83,6 +83,13 @@ final class Transcriber {
         }
 
         try await analyzer.start(inputSequence: inputSequence)
+
+        if let contextualStrings {
+            // start 後再設一次 — setContext 的生效時序文件沒講清楚，兩邊都掛上（冪等、無害）
+            let ctx = AnalysisContext()
+            ctx.contextualStrings = [.general: contextualStrings]
+            try await analyzer.setContext(ctx)
+        }
     }
 
     /// run 平均信心（以字元數加權；volatile 可能整串沒有 → nil）。
