@@ -21,7 +21,6 @@ struct CodexAgent: Sendable {
     var model = "gpt-5.4-mini"
 
     func stream(instruction: String, transcript: String,
-                activity: String? = nil,
                 resume threadID: String? = nil,
                 images: [String] = []) -> AsyncThrowingStream<CodexEvent, Error> {
         let (events, cont) = AsyncThrowingStream<CodexEvent, Error>.makeStream()
@@ -34,15 +33,10 @@ struct CodexAgent: Sendable {
                 + "被問到「之前 / 上週 / 那個影片」這類過去的事，先 grep transcripts 再回答。）\n\n"
             : ""
 
-        // prompt 分段：指令 → 當下環境（被動觀測）→ 逐字稿 tail。
-        // resume 時 codex 記得舊的，但新語音 / 新環境只在這次的 tail 裡。
-        var prompt = orientation + instruction
-        if let activity, !activity.isEmpty {
-            prompt += "\n\n（使用者當下在做什麼）\n\(activity)"
-        }
-        if !transcript.isEmpty {
-            prompt += "\n\n（最新逐字稿片段，可能與前次部分重疊）\n\(transcript)"
-        }
+        // 逐字稿包進 prompt（resume 時 codex 記得舊的，但新語音只在這份 tail 裡）
+        let prompt = transcript.isEmpty
+            ? orientation + instruction
+            : "\(orientation)\(instruction)\n\n（最新逐字稿片段，可能與前次部分重疊）\n\(transcript)"
 
         // 截圖走 -i（fresh / resume 都收）；path 是自家產的 ~/.kilo/captures/*.png，單引號包安全
         let imageFlags = images.map { "-i '\($0)'" }.joined(separator: " ")
