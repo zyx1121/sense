@@ -29,6 +29,7 @@ final class WindowActivity {
         if let app = NSWorkspace.shared.frontmostApplication, let name = app.localizedName {
             rebind(pid: app.processIdentifier, name: name)   // bootstrap：啟動當下的前景
         }
+        Telemetry.observe.info("軌1 視窗追蹤啟動（Accessibility \(AXIsProcessTrusted() ? "已授權" : "未授權 → 只有 app 名", privacy: .public)）")
     }
 
     /// 前景換 app：拆舊 observer、綁新 app、讀一次當前 window、更新 store。
