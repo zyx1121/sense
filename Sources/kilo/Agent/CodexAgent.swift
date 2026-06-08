@@ -20,6 +20,27 @@ struct CodexAgent: Sendable {
     let apiKey: String?
     var model = "gpt-5.4-mini"
 
+    /// GUI app 從 Finder/launchd 啟動是貧瘠環境：`zsh -lc`（login 非 interactive）不載 ~/.zshrc，
+    /// 撈不到 fnm / codex 的 PATH → `command not found: codex`。啟動撈一次 interactive login shell 的
+    /// 完整 PATH 快取、執行時注入 — 每輪 codex 仍走乾淨 `-lc`，不付載整份 .zshrc + plugin 的成本。
+    static let shellPath: String = {
+        let fallback = ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin"
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        proc.arguments = ["-ilc", "echo __KILOPATH__$PATH"]  // 標記前綴：從 .zshrc 的 history/plugin 雜訊裡撈 PATH 行
+        let pipe = Pipe()
+        proc.standardOutput = pipe
+        proc.standardError = FileHandle.nullDevice
+        proc.standardInput = FileHandle.nullDevice
+        guard (try? proc.run()) != nil else { return fallback }
+        proc.waitUntilExit()
+        let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        guard let line = out.split(separator: "\n").first(where: { $0.contains("__KILOPATH__") }),
+              let range = line.range(of: "__KILOPATH__") else { return fallback }
+        let path = String(line[range.upperBound...])
+        return path.isEmpty ? fallback : path
+    }()
+
     func stream(instruction: String, transcript: String,
                 resume threadID: String? = nil,
                 images: [String] = []) -> AsyncThrowingStream<CodexEvent, Error> {
@@ -55,6 +76,7 @@ struct CodexAgent: Sendable {
         proc.executableURL = URL(fileURLWithPath: "/bin/zsh")
         proc.arguments = ["-lc", cmd]
         var env = ProcessInfo.processInfo.environment
+        env["PATH"] = Self.shellPath  // 注入 interactive shell 的完整 PATH，GUI app 才找得到 codex / node
         env["KILO_PROMPT"] = prompt
         if let apiKey { env["CODEX_API_KEY"] = apiKey }
         proc.environment = env

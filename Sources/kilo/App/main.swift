@@ -42,6 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusBar: StatusBarController?
 
     func applicationDidFinishLaunching(_: Notification) {
+        Task.detached { _ = CodexAgent.shellPath }  // 背景預熱 codex PATH 解析（GUI app 貧瘠環境用）
         statusBar = StatusBarController()  // 選單列入口（控制 app 的唯一處）
         showOverlay()
         showSummaryWindow()
