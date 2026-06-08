@@ -49,6 +49,7 @@ final class TranscriptPolisher {
     private var running = false
     private var idleTask: Task<Void, Never>?
     private let pairLogger = PolishPairLogger()  // 蒸餾訓練料：(raw → cleaned) 配對累積
+    private let local = LocalPolisher()           // 階段2 baseline：本地模型對照（不上稿，只 log 比對）
 
     var backendName: String { apiKey == nil ? "無（原文直出）" : model }
 
@@ -56,6 +57,7 @@ final class TranscriptPolisher {
         self.store = store
         self.archiver = archiver
         self.apiKey = Keychain.openAIKey()
+        local.load()  // 背景載入本地模型，ready 後開始對照
     }
 
     /// 每段 final 進來後呼叫。批次 = 開頭同語言的連續段：
@@ -87,6 +89,7 @@ final class TranscriptPolisher {
                 if !cleaned.isEmpty {
                     pairLogger.log(raw: run.text, cleaned: cleaned, locale: run.locale, contextTail: tail)
                 }
+                compareLocal(raw: run.text, locale: run.locale, gpt: cleaned)
             } catch {
                 committed = store.commitPolished(run.text, locale: run.locale, consumedSegments: run.segments)  // 原文轉正，不卡顯示
                 Telemetry.polish.error("polish failed: \(error.localizedDescription, privacy: .public)")
@@ -94,6 +97,16 @@ final class TranscriptPolisher {
             if let committed { archiver.append(committed, source: run.source) }  // 持久化（整理後的定稿）
             running = false
             nudge()  // 積壓續跑 / 重設 idle timer
+        }
+    }
+
+    /// 對照本地模型 baseline：背景跑 Qwen3-1.7B，log 跟 gpt 的輸出 + 延遲比對（不上稿、不影響流程）。
+    private func compareLocal(raw: String, locale: String, gpt: String) {
+        guard local.ready, !raw.isEmpty else { return }
+        Task {
+            guard let r = await local.polish(chunk: raw, locale: locale) else { return }
+            Telemetry.polish.info("⟁ local \(r.ms, privacy: .public)ms │ \(r.text, privacy: .public)")
+            Telemetry.polish.info("⟁ gpt         │ \(gpt, privacy: .public)")
         }
     }
 
