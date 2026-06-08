@@ -32,6 +32,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let captions = CaptionModel()
     private let transcript = TranscriptStore()
     private let metrics = MetricsStore()
+    private let observations = ObservationStore()
     private let source = SystemAudioSource()
     private var transcribers: [Transcriber] = []
     private var router: LanguageRouter?
@@ -39,14 +40,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var summaryWindow: SummaryWindow?
     private var agentController: AgentController?
     private var shakeCapture: ShakeCapture?
+    private var windowActivity: WindowActivity?
+    private var fileActivity: FileActivity?
     private var statusBar: StatusBarController?
 
     func applicationDidFinishLaunching(_: Notification) {
         statusBar = StatusBarController()  // 選單列入口（控制 app 的唯一處）
         showOverlay()
         showSummaryWindow()
+        startObserving()
         startShakeCapture()
         startPipeline()
+    }
+
+    /// 被動觀測三軌（軌1 視窗/app 活動 + 軌3 檔案操作）→ ObservationStore → agent 當下 context。
+    private func startObserving() {
+        let win = WindowActivity(store: observations)
+        win.start()
+        windowActivity = win
+        let file = FileActivity(store: observations)
+        file.start()
+        fileActivity = file
     }
 
     /// 晃游標 → 圈選畫面元素給 Kilo 看（dim + spotlight + click capture）。
@@ -85,7 +99,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let polisher = TranscriptPolisher(store: transcript, archiver: TranscriptArchiver())
         logErr("逐字稿整理模型：\(polisher.backendName)")
-        let controller = AgentController(store: transcript, agent: agent, metrics: metrics, polisher: polisher)
+        let controller = AgentController(store: transcript, agent: agent, metrics: metrics,
+                                         polisher: polisher, observations: observations)
         self.agentController = controller
         let win = SummaryWindow(store: transcript, controller: controller)
         win.show()

@@ -30,15 +30,17 @@ final class AgentController {
     private let agent: CodexAgent?
     private let metrics: MetricsStore
     private let polisher: TranscriptPolisher
-    private let sources = SourceTracker()
+    private let observations: ObservationStore
     private let screenCapturer = Capturer()
     private var threadID: String?  // codex session，app 重啟歸零
 
-    init(store: TranscriptStore, agent: CodexAgent?, metrics: MetricsStore, polisher: TranscriptPolisher) {
+    init(store: TranscriptStore, agent: CodexAgent?, metrics: MetricsStore,
+         polisher: TranscriptPolisher, observations: ObservationStore) {
         self.store = store
         self.agent = agent
         self.metrics = metrics
         self.polisher = polisher
+        self.observations = observations
     }
 
     /// 辨識中的 volatile → overlay 灰字尾巴（打字機）。
@@ -49,7 +51,7 @@ final class AgentController {
     /// 每段定稿進逐字稿（顯示 + codex context），並戳 polisher 整理。
     /// locale 跟著進 pending（整理選對指令語言）、來源（前景 app）跟著進歸檔。
     func appendFinal(_ text: String, locale: String) {
-        store.commitFinal(text, locale: locale, source: sources.current())
+        store.commitFinal(text, locale: locale, source: observations.currentSource)
         metrics.recordSegment(chars: text.count)
         polisher.nudge()
     }
@@ -114,10 +116,12 @@ final class AgentController {
 
         store.setThinking(true)
         let transcript = store.context
+        let activity = observations.snapshot()
         Task {
             let start = Date()
             var result = await runTurn(agent, instruction: fullInstruction,
-                                       transcript: transcript, resume: threadID, images: imagePaths)
+                                       transcript: transcript, activity: activity,
+                                       resume: threadID, images: imagePaths)
 
             // resume 失敗（session 被 GC / 重開機後不存在）且還沒有任何回覆 → 重開新 session 再試一次
             if result.error != nil, threadID != nil, !result.gotMessage {
@@ -125,7 +129,8 @@ final class AgentController {
                 store.upsertStep(id: "resume-retry", title: "session 失效，重開新對話",
                                  running: false, failed: false)
                 result = await runTurn(agent, instruction: fullInstruction,
-                                       transcript: transcript, resume: nil, images: imagePaths)
+                                       transcript: transcript, activity: activity,
+                                       resume: nil, images: imagePaths)
             }
 
             if let error = result.error {
@@ -158,11 +163,11 @@ final class AgentController {
 
     /// 跑一輪 codex turn，事件直灌 feed；回傳是否收到回覆與錯誤。
     private func runTurn(_ agent: CodexAgent, instruction: String, transcript: String,
-                         resume: String?, images: [String] = []) async -> (gotMessage: Bool, error: Error?) {
+                         activity: String?, resume: String?, images: [String] = []) async -> (gotMessage: Bool, error: Error?) {
         var got = false
         do {
-            for try await ev in agent.stream(instruction: instruction,
-                                             transcript: transcript, resume: resume, images: images) {
+            for try await ev in agent.stream(instruction: instruction, transcript: transcript,
+                                             activity: activity, resume: resume, images: images) {
                 switch ev {
                 case .thread(let id):
                     threadID = id
