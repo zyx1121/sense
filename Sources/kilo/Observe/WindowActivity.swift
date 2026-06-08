@@ -14,6 +14,7 @@ final class WindowActivity {
     private var observer: AXObserver?
     private var observedApp: AXUIElement?
     private var observedName = ""
+    private var refreshTimer: Timer?
 
     init(store: ObservationStore) { self.store = store }
 
@@ -57,10 +58,17 @@ final class WindowActivity {
         observer = obs
     }
 
-    /// observer callback：前景 app 內視窗/標題變了，重讀 title（app 沒變，沿用 observedName）。
+    /// observer callback：前景 app 內標題變了。高頻變化（terminal spinner、下載進度、影片計時）
+    /// 會狂發 — debounce 1.2s，連續變化只在靜止後記一次，免洗 log + 省 AX 讀取。
+    /// app 切換不走這裡（rebind 立即記），所以切 app 仍即時。
     private func refresh() {
-        guard let axApp = observedApp else { return }
-        store.observeForeground(app: observedName, window: focusedTitle(axApp))
+        refreshTimer?.invalidate()
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: 1.2, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, let axApp = self.observedApp else { return }
+                self.store.observeForeground(app: self.observedName, window: self.focusedTitle(axApp))
+            }
+        }
     }
 
     /// 讀 app 的 focused window 標題（瀏覽器分頁標題跟著 window title 走）。
@@ -75,6 +83,7 @@ final class WindowActivity {
     }
 
     private func teardown() {
+        refreshTimer?.invalidate(); refreshTimer = nil
         if let obs = observer {
             CFRunLoopRemoveSource(CFRunLoopGetCurrent(), AXObserverGetRunLoopSource(obs), .commonModes)
             observer = nil

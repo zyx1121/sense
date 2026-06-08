@@ -24,14 +24,14 @@ Leave kilo running while you watch a video, sit in a meeting, take a class:
 - **Continuous transcript** — a draggable overlay accumulates the full text; a small model cleans the raw stream in the background (punctuation, mis-recognition fixes, paragraph breaks) — the grey tail keeps flowing in and is replaced by polished white text seconds later
 - **Ask Kilo** — the input field talks straight to a codex agent (carrying the recent transcript + session memory); tool-use steps surface live, replies stream typewriter-style; tell it to take a note and it writes into `~/.kilo/`, and paths in its replies open on click
 - **Shake to capture** — wiggle the cursor to enter selection mode: the screen dims, the UI element under the cursor lights up, left-click collects it (text as text, anything else as a screenshot), right-click ends. Captures become chips above the input field, handed to codex on the next turn
-- **Ambient context** — passively tracks which app/window you're in (the YouTube video, the meeting, the Finder folder) plus file operations under Desktop/Documents/Downloads; handed to codex as "what you're doing right now" each turn
+- **Ambient context** — passively tracks which app/window you're in (the YouTube video, the meeting, the Finder folder), which app is emitting audio, plus file operations under Desktop/Documents/Downloads; handed to codex as "what you're doing right now" each turn
 
 ## Pipeline
 
 ```
 system audio (ScreenCaptureKit) ─→ SpeechAnalyzer ─→ notch captions (volatile/final)
                                       └→ continuous transcript ─→ cleanup (gpt-5.4-mini) ┐
-foreground window/app (AXObserver) + file ops (FSEvents) ─→ ObservationStore             ├─→ codex exec ─→ feed
+window/app · audio source · file ops (AX · Core Audio · FSEvents) ─→ ObservationStore    ├─→ codex exec ─→ feed
 cursor shake ─→ dim + AX spotlight ─→ click to capture ─→ chips                          ┘
 ```
 
@@ -80,7 +80,7 @@ kilo is a sensory agent: it records system audio, screenshots what you select, a
 | System audio | **On-device** SpeechAnalyzer transcription — audio never leaves your Mac |
 | Transcript | Sent to **OpenAI** `gpt-5.4-mini` for cleanup |
 | Your instruction + recent transcript + selected screenshots | Sent to **codex / OpenAI** to generate a reply |
-| Foreground window titles + file operations | Observed **on-device**; sent to **codex / OpenAI** as ambient context, same path as the transcript |
+| Foreground window titles + audio source + file operations | Observed **on-device**; sent to **codex / OpenAI** as ambient context, same path as the transcript |
 | Notes / transcript archive | **Local** `~/.kilo`, never uploaded |
 
 **The key and codex are your own** — kilo uses the OpenAI key in your Keychain and the codex CLI on your PATH; it bundles neither, manages neither, and routes nothing through the author's servers. What gets sent to OpenAI is decided by how you use it; kilo just wires it up. Transcripts and notes live only in your local `~/.kilo`.
@@ -95,7 +95,7 @@ Sources/kilo/
 ├── Agent/       codex exec --json streaming + session resume
 ├── Overlay/     notch captions + main window (transcript / feed / chips)
 ├── Core/        Telemetry / Keychain / Metrics / ObservationStore (observation hub)
-├── Observe/     foreground window/app activity (AXObserver) + file ops (FSEvents)
+├── Observe/     window/app (AXObserver) + audio source (Core Audio) + file ops (FSEvents)
 └── Shake/       cursor-shake capture (ported from zyx1121/shake)
 ```
 
