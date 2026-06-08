@@ -24,15 +24,15 @@
 - **連續逐字稿** — 可拖動的 overlay 視窗累積全文；小模型背景把生稿補標點、修辨識錯字、分段 — 灰字尾巴一直流入，幾秒後被整理過的白字取代
 - **問 Kilo** — 輸入框直通 codex agent（帶最近逐字稿 + session 記憶），tool use 步驟即時浮出、回應打字機串流；說「記錄下來」它就寫筆記進 `~/.kilo/`，回覆裡的路徑點了直接開
 - **Shake 圈選** — 晃游標進選取模式：螢幕變暗、游標下的 UI 元素亮起，左鍵點擊收集（文字收文字、其他截圖），右鍵結束；素材變輸入框上方的 chips，下一輪丟給 codex 看圖分析
-- **環境感知** — 背景觀測你當下在哪個 app、看什麼視窗（YouTube 影片、會議、Finder 資料夾），以及 Desktop/Documents/Downloads 的檔案操作；每輪當成「你正在做什麼」一起給 codex
+- **環境感知** — 背景觀測你當下在哪個 app、看什麼視窗（YouTube 影片、會議、Finder 資料夾）、哪個 app 在發聲，以及 Desktop/Documents/Downloads 的檔案操作；每輪當成「你正在做什麼」一起給 codex
 
 ## Pipeline
 
 ```
 系統音訊 (ScreenCaptureKit) ─→ SpeechAnalyzer ─→ 瀏海字幕 (volatile/final)
                                   └→ 連續逐字稿 ─→ 小模型整理 (gpt-5.4-mini) ┐
-前景視窗/app (AXObserver) + 檔案操作 (FSEvents) ─→ ObservationStore           ├─→ codex exec ─→ feed
-晃游標 ─→ dim + AX spotlight ─→ 點擊圈選 ─→ chips                            ┘
+視窗/app · 發聲來源 · 檔案操作 (AX · Core Audio · FSEvents) ─→ ObservationStore  ├─→ codex exec ─→ feed
+晃游標 ─→ dim + AX spotlight ─→ 點擊圈選 ─→ chips                              ┘
 ```
 
 ## 跑起來（不開 Xcode）
@@ -80,7 +80,7 @@ kilo 是感官 agent，會錄系統音訊、截你圈選的畫面，並被動觀
 | 系統音訊 | **本機** SpeechAnalyzer 即時轉錄，音訊不離開你的 Mac |
 | 逐字稿 | 送 **OpenAI** `gpt-5.4-mini` 整理潤稿 |
 | 你的指令 + 最近逐字稿 + 圈選截圖 | 送 **codex / OpenAI** 產生回應 |
-| 前景視窗標題 + 檔案操作 | **本機** 觀測，跟逐字稿同一條路送 **codex / OpenAI** 當當下 context |
+| 前景視窗標題 + 發聲來源 + 檔案操作 | **本機** 觀測，跟逐字稿同一條路送 **codex / OpenAI** 當當下 context |
 | 筆記 / 逐字稿存檔 | **本機** `~/.kilo`，不上傳 |
 
 **key 與 codex 都是你自己的** — kilo 用你 Keychain 裡的 OpenAI key、你 PATH 上的 codex CLI，不內建、不代管、不經過作者的任何伺服器。送什麼給 OpenAI 由你的使用決定，kilo 只是把它接起來；逐字稿與筆記只存在你本機的 `~/.kilo`。
@@ -95,7 +95,7 @@ Sources/kilo/
 ├── Agent/       codex exec --json 串流 + session resume
 ├── Overlay/     瀏海字幕 + 主視窗（逐字稿 / feed / chips）
 ├── Core/        Telemetry / Keychain / Metrics / ObservationStore（觀測統一層）
-├── Observe/     前景視窗/app 活動（AXObserver）+ 檔案操作（FSEvents）
+├── Observe/     視窗/app（AXObserver）+ 發聲來源（Core Audio）+ 檔案操作（FSEvents）
 └── Shake/       晃游標圈選（ported from zyx1121/shake）
 ```
 
