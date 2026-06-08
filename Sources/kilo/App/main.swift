@@ -42,6 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var shakeCapture: ShakeCapture?
     private var windowActivity: WindowActivity?
     private var fileActivity: FileActivity?
+    private var audioActivity: AudioActivity?
     private var statusBar: StatusBarController?
 
     func applicationDidFinishLaunching(_: Notification) {
@@ -61,6 +62,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let file = FileActivity(store: observations)
         file.start()
         fileActivity = file
+        let audio = AudioActivity(store: observations)
+        audio.start()
+        audioActivity = audio
     }
 
     /// 晃游標 → 圈選畫面元素給 Kilo 看（dim + spotlight + click capture）。

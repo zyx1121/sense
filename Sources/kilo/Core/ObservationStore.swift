@@ -13,6 +13,7 @@ final class ObservationStore {
     private var foregroundApp: String?
     private var foregroundWindow: String?
     private var media: String?   // 軌2a 之後填：「▶ 標題 12:30/45:00」
+    private var audible: [String] = []   // 軌2b：正在輸出音訊的 app（latest-wins）
 
     // 離散事件（append + ring buffer）
     private var recent: [String] = []
@@ -42,6 +43,14 @@ final class ObservationStore {
         media = summary
     }
 
+    /// 軌2b：當前正在輸出音訊的 app 集合（latest-wins）。新發聲的 app 記一筆事件。
+    func observeAudible(_ apps: [String]) {
+        guard apps != audible else { return }
+        for app in apps where !audible.contains(app) { append("\(app) 開始發聲") }
+        audible = apps
+        Telemetry.observe.info("發聲中：\(apps.isEmpty ? "(無)" : apps.joined(separator: ", "), privacy: .public)")
+    }
+
     private func append(_ text: String) {
         guard recent.last != text else { return }   // 連續相同去重（FSEvents 改名會雙發等）
         recent.append(text)
@@ -64,6 +73,7 @@ final class ObservationStore {
         if let app = foregroundApp {
             lines.append("前景：\(app)" + (foregroundWindow.map { " — \($0)" } ?? ""))
         }
+        if !audible.isEmpty { lines.append("發聲中：\(audible.joined(separator: ", "))") }
         if let media { lines.append("播放：\(media)") }
         let tail = recent.suffix(recentLimit)
         if !tail.isEmpty {
