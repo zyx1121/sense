@@ -23,9 +23,13 @@ final class ObservationStore {
     /// 軌1：前景 app/window 變了。app 真的換掉才往 ring buffer 記一筆「切到 X」，
     /// 同 app 內換視窗/分頁只更新當前狀態（title 會狂變，不能每次都記事件）。
     func observeForeground(app: String, window: String?) {
+        let changed = app != foregroundApp || window != foregroundWindow
         if app != foregroundApp { append("切到 \(app)") }
         foregroundApp = app
         foregroundWindow = window
+        if changed {
+            Telemetry.observe.info("前景 \(app, privacy: .public)\(window.map { " — \($0)" } ?? "", privacy: .public)")
+        }
     }
 
     /// 軌3：檔案操作離散事件，summary 形如「新增 ~/Desktop/報告.pdf」。
@@ -42,6 +46,7 @@ final class ObservationStore {
         guard recent.last != text else { return }   // 連續相同去重（FSEvents 改名會雙發等）
         recent.append(text)
         if recent.count > recentCap { recent.removeFirst(recent.count - recentCap) }
+        Telemetry.observe.info("\(text, privacy: .public)")
     }
 
     // MARK: - 讀取端（agent / 歸檔）

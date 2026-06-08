@@ -33,6 +33,7 @@ final class FileActivity {
         FSEventStreamSetDispatchQueue(stream, queue)
         FSEventStreamStart(stream)
         self.stream = stream
+        Telemetry.observe.info("軌3 檔案監控啟動：Desktop / Documents / Downloads")
     }
 
     /// @convention(c) callback 不能 capture — self 透過 ctx.info 傳進來。
