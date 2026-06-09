@@ -25,6 +25,41 @@ Leave kilo-sense running while you watch a video, sit in a meeting, take a class
 - **Ask Kilo** — the input field talks straight to a codex agent (carrying the recent transcript + session memory); tool-use steps surface live, replies stream typewriter-style; tell it to take a note and it writes into `~/.kilo/`, and paths in its replies open on click
 - **Shake to capture** — wiggle the cursor to enter selection mode: the screen dims, the UI element under the cursor lights up, left-click collects it (text as text, anything else as a screenshot), right-click ends. Captures become chips above the input field, handed to codex on the next turn
 
+## Architecture
+
+```mermaid
+flowchart TD
+    ear["👂 System audio<br/>what you hear"]
+    eye["👆 Shake-to-capture<br/>what you point at"]
+    asr["Live transcription<br/>SpeechAnalyzer · dual-language routing"]
+    notch["Notch captions<br/>grey volatile → white final"]
+    hub["📝 Transcript + context hub"]
+    polish["Transcript cleanup<br/>gpt-5.4-mini"]
+    agent["Codex agent<br/>codex exec --json"]
+    ui["Ask Kilo<br/>main window · feed · chips"]
+    disk[("~/.kilo · local<br/>notes · transcripts · captures · training")]
+
+    ear --> asr
+    asr --> notch
+    asr --> hub
+    eye --> hub
+    hub --> polish
+    hub --> ui
+    ui <--> agent
+    hub --> agent
+    polish --> disk
+    agent --> disk
+
+    classDef device fill:#e6f4ea,stroke:#34a853,color:#0b3d20;
+    classDef cloud fill:#e8f0fe,stroke:#4285f4,color:#0b2a5b;
+    classDef store fill:#fef7e0,stroke:#f9ab00,color:#5b4300;
+    class ear,eye,asr,notch,hub,ui device;
+    class polish,agent cloud;
+    class disk store;
+```
+
+> 🟩 **on-device** — sensing + UI; system audio never leaves your Mac. 🟦 **cloud** — your own OpenAI key / codex CLI (cleanup + reasoning only). 🟨 **local** — everything persists under `~/.kilo`.
+
 ## Pipeline
 
 ```

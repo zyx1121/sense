@@ -25,6 +25,41 @@
 - **問 Kilo** — 輸入框直通 codex agent（帶最近逐字稿 + session 記憶），tool use 步驟即時浮出、回應打字機串流；說「記錄下來」它就寫筆記進 `~/.kilo/`，回覆裡的路徑點了直接開
 - **Shake 圈選** — 晃游標進選取模式：螢幕變暗、游標下的 UI 元素亮起，左鍵點擊收集（文字收文字、其他截圖），右鍵結束；素材變輸入框上方的 chips，下一輪丟給 codex 看圖分析
 
+## 架構
+
+```mermaid
+flowchart TD
+    ear["👂 系統音訊<br/>你正在聽的"]
+    eye["👆 Shake 圈選<br/>你指的"]
+    asr["即時轉錄<br/>SpeechAnalyzer · 雙語信心擇優"]
+    notch["瀏海字幕<br/>灰字 volatile → 白字 final"]
+    hub["📝 逐字稿 + 上下文中樞"]
+    polish["逐字稿潤稿<br/>gpt-5.4-mini"]
+    agent["Codex agent<br/>codex exec --json"]
+    ui["問 Kilo<br/>主視窗 · feed · chips"]
+    disk[("~/.kilo · 本機<br/>notes · transcripts · captures · training")]
+
+    ear --> asr
+    asr --> notch
+    asr --> hub
+    eye --> hub
+    hub --> polish
+    hub --> ui
+    ui <--> agent
+    hub --> agent
+    polish --> disk
+    agent --> disk
+
+    classDef device fill:#e6f4ea,stroke:#34a853,color:#0b3d20;
+    classDef cloud fill:#e8f0fe,stroke:#4285f4,color:#0b2a5b;
+    classDef store fill:#fef7e0,stroke:#f9ab00,color:#5b4300;
+    class ear,eye,asr,notch,hub,ui device;
+    class polish,agent cloud;
+    class disk store;
+```
+
+> 🟩 **on-device** — 感知 + UI；系統音訊不離開你的 Mac。 🟦 **cloud** — 你自己的 OpenAI key / codex CLI（只做潤稿 + 推理）。 🟨 **本機** — 全部落在 `~/.kilo`。
+
 ## Pipeline
 
 ```
