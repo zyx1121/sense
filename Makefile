@@ -1,4 +1,4 @@
-APP_NAME   := kilo
+APP_NAME   := kilo-sense
 BUNDLE_ID  := tw.zyx.kilo
 BIN_PATH   := .build/release/$(APP_NAME)
 APP_BUNDLE := build/$(APP_NAME).app

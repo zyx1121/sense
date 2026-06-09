@@ -7,7 +7,7 @@
 	<key>CFBundleName</key>
 	<string>kilo</string>
 	<key>CFBundleExecutable</key>
-	<string>kilo</string>
+	<string>kilo-sense</string>
 	<key>CFBundleIconFile</key>
 	<string>AppIcon</string>
 	<key>CFBundleDisplayName</key>

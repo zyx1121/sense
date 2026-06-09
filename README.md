@@ -7,7 +7,7 @@
 ╚═╝  ╚═╝╚═╝╚══════╝ ╚═════╝
 ```
 
-# kilo
+# kilo-sense
 
 > macOS sensory agent — hears what you're hearing, sees what you point at; transcribes, cleans up, analyzes, and remembers, in real time.
 
@@ -17,7 +17,7 @@
 
 ## What it does
 
-Leave kilo running while you watch a video, sit in a meeting, take a class:
+Leave kilo-sense running while you watch a video, sit in a meeting, take a class:
 
 - **Notch captions** — system audio transcribed live; volatile text types out in grey, finalizes to white, scrolling one line beneath the notch
 - **Auto CN/EN switching** — two `SpeechTranscriber` paths run at once; it compares each path's per-final confidence (EMA + hysteresis) and follows whichever language you're speaking
@@ -44,7 +44,7 @@ make locales   # dump SpeechTranscriber supported languages
 make logs      # live Telemetry (asr / polish / agent / shake)
 ```
 
-Once installed, a kilo item appears in the menu bar — open the transcript folder, permission shortcuts, launch-at-login, restart, quit.
+Once installed, a Kilo item appears in the menu bar — open the transcript folder, permission shortcuts, launch-at-login, restart, quit.
 
 ## Distribution (sharing it)
 
@@ -67,13 +67,13 @@ Requirements:
 Transcript cleanup goes through `gpt-5.4-mini` over the API directly (no OpenAI key → raw text passes through unpolished).
 
 ```bash
-./build/kilo.app/Contents/MacOS/kilo --langs zh-TW,en-US   # dual-path confidence routing (default)
-./build/kilo.app/Contents/MacOS/kilo --lang ja-JP          # single language
+./build/kilo-sense.app/Contents/MacOS/kilo-sense --langs zh-TW,en-US   # dual-path confidence routing (default)
+./build/kilo-sense.app/Contents/MacOS/kilo-sense --lang ja-JP          # single language
 ```
 
 ## Privacy — where data goes
 
-kilo is a sensory agent: it records system audio and screenshots what you select. The data flow, spelled out:
+kilo-sense is a sensory agent: it records system audio and screenshots what you select. The data flow, spelled out:
 
 | Data | Where it goes |
 |---|---|
@@ -82,12 +82,12 @@ kilo is a sensory agent: it records system audio and screenshots what you select
 | Your instruction + recent transcript + selected screenshots | Sent to **codex / OpenAI** to generate a reply |
 | Notes / transcript archive | **Local** `~/.kilo`, never uploaded |
 
-**The key and codex are your own** — kilo uses the OpenAI key in your Keychain and the codex CLI on your PATH; it bundles neither, manages neither, and routes nothing through the author's servers. What gets sent to OpenAI is decided by how you use it; kilo just wires it up. Transcripts and notes live only in your local `~/.kilo`.
+**The key and codex are your own** — kilo-sense uses the OpenAI key in your Keychain and the codex CLI on your PATH; it bundles neither, manages neither, and routes nothing through the author's servers. What gets sent to OpenAI is decided by how you use it; kilo-sense just wires it up. Transcripts and notes live only in your local `~/.kilo`.
 
 ## Layout
 
 ```
-Sources/kilo/
+Sources/kilo-sense/
 ├── App/         main.swift — wiring & launch
 ├── Audio/       ScreenCaptureKit system audio → PCM
 ├── Transcript/  SpeechAnalyzer transcription + store + small-model cleanup

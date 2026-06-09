@@ -5,7 +5,7 @@
 set -euo pipefail
 
 APP="$1"; DMG="$2"; BG="$3"
-VOL="kilo"
+VOL="kilo-sense"
 APP_NAME="$(basename "$APP")"
 STAGE="$(mktemp -d)"
 TMPDMG="$(mktemp -u).dmg"

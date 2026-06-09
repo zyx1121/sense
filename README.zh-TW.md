@@ -7,7 +7,7 @@
 ╚═╝  ╚═╝╚═╝╚══════╝ ╚═════╝
 ```
 
-# kilo
+# kilo-sense
 
 > macOS 感官 agent — 聽見你在聽的、看見你指的，即時轉錄、整理、分析、記錄。
 
@@ -17,7 +17,7 @@
 
 ## 它做什麼
 
-開著 kilo 看影片、開會、上課：
+開著 kilo-sense 看影片、開會、上課：
 
 - **瀏海字幕** — 系統音訊即時轉錄，volatile 灰字逐字打出、定稿轉白，瀏海下方一行流過
 - **中英自動切換** — 兩路 SpeechTranscriber 同時轉錄，比較各路定稿信心（EMA + 遲滯），講到哪個語言就自動走哪路
@@ -44,7 +44,7 @@ make locales   # dump SpeechTranscriber 支援語言
 make logs      # 即時看 Telemetry（asr / polish / agent / shake）
 ```
 
-裝好後選單列會有 kilo 圖示 — 開逐字稿資料夾、權限設定、開機自啟、重啟、結束都在那。
+裝好後選單列會有 Kilo 圖示 — 開逐字稿資料夾、權限設定、開機自啟、重啟、結束都在那。
 
 ## 分發（給別人）
 
@@ -67,13 +67,13 @@ make publish   # make release + 傳上 GitHub Release（簽名私鑰不出本機
 逐字稿整理走 `gpt-5.4-mini` 直打 API（沒 OpenAI key → 原文直出，不整理）。
 
 ```bash
-./build/kilo.app/Contents/MacOS/kilo --langs zh-TW,en-US   # 雙路信心擇優（預設）
-./build/kilo.app/Contents/MacOS/kilo --lang ja-JP          # 單語模式
+./build/kilo-sense.app/Contents/MacOS/kilo-sense --langs zh-TW,en-US   # 雙路信心擇優（預設）
+./build/kilo-sense.app/Contents/MacOS/kilo-sense --lang ja-JP          # 單語模式
 ```
 
 ## 隱私 — 資料去哪
 
-kilo 是感官 agent，會錄系統音訊、截你圈選的畫面。資料流向講清楚：
+kilo-sense 是感官 agent，會錄系統音訊、截你圈選的畫面。資料流向講清楚：
 
 | 資料 | 去哪 |
 |---|---|
@@ -82,12 +82,12 @@ kilo 是感官 agent，會錄系統音訊、截你圈選的畫面。資料流向
 | 你的指令 + 最近逐字稿 + 圈選截圖 | 送 **codex / OpenAI** 產生回應 |
 | 筆記 / 逐字稿存檔 | **本機** `~/.kilo`，不上傳 |
 
-**key 與 codex 都是你自己的** — kilo 用你 Keychain 裡的 OpenAI key、你 PATH 上的 codex CLI，不內建、不代管、不經過作者的任何伺服器。送什麼給 OpenAI 由你的使用決定，kilo 只是把它接起來；逐字稿與筆記只存在你本機的 `~/.kilo`。
+**key 與 codex 都是你自己的** — kilo-sense 用你 Keychain 裡的 OpenAI key、你 PATH 上的 codex CLI，不內建、不代管、不經過作者的任何伺服器。送什麼給 OpenAI 由你的使用決定，kilo-sense 只是把它接起來；逐字稿與筆記只存在你本機的 `~/.kilo`。
 
 ## 結構
 
 ```
-Sources/kilo/
+Sources/kilo-sense/
 ├── App/         main.swift — 接線與啟動
 ├── Audio/       ScreenCaptureKit 系統音訊 → PCM
 ├── Transcript/  SpeechAnalyzer 轉錄 + store + 小模型整理
