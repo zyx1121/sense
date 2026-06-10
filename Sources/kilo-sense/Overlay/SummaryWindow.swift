@@ -90,6 +90,10 @@ struct TranscriptView: View {
                             .padding(.horizontal, 16)
                             .contextMenu {
                                 Button("複製逐字稿") { copyText(String(transcriptText.characters)) }
+                                Divider()
+                                Button("清除逐字稿（已存檔的不動）", role: .destructive) {
+                                    store.clearTranscript()
+                                }
                             }
                         Color.clear.frame(height: 1).id("bottom")
                     }

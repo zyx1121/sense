@@ -128,6 +128,20 @@ final class TranscriptStore {
     private(set) var recentTurns: [(source: String?, text: String)] = []
     private(set) var turnsVersion = 0
 
+    /// 畫面世代 — 「清除逐字稿」遞增；清除瞬間還在飛的 polish 批帶著舊世代回來，
+    /// 只進歸檔不再上畫面（不擋歸檔，擋復活）。
+    private(set) var transcriptEpoch = 0
+
+    /// 清畫面開新段落：已歸檔的不動（~/.kilo/transcripts 永遠完整），只清顯示與待整理層。
+    func clearTranscript() {
+        volatileTask?.cancel(); volatileTask = nil
+        polished = ""; pending = []; volatileTarget = ""; volatileShown = ""
+        lastPolishedLocale = nil
+        recentTurns = []
+        transcriptEpoch += 1
+        touchOverlay()
+    }
+
     // — overlay 可見性：shake / 打字 / agent 活動 / hover 續命，閒置自動收合 —
     // 聲音（逐字稿流入）刻意不續命：那是 notch 的展開條件，overlay 只跟「使用者在動它」走。
     private(set) var overlayShown = true
@@ -191,10 +205,11 @@ final class TranscriptStore {
     /// 同語言看句末標點（有 → 空行；無 → 斷句續接）。
     @discardableResult
     func commitPolished(_ cleaned: String, locale: String, consumedSegments: Int,
-                        source: String? = nil) -> String? {
+                        source: String? = nil, epoch: Int? = nil) -> String? {
         pending.removeFirst(min(consumedSegments, pending.count))
         let c = breakLines(trimOverlap(cleaned.trimmingCharacters(in: .whitespacesAndNewlines)))
         guard !c.isEmpty else { return nil }
+        if let epoch, epoch != transcriptEpoch { return c }  // 清除後才回來的批：歸檔照走、畫面不復活
         let sentenceEnd = polished.last.map { "。！？.!?…".contains($0) } ?? false
         let langChanged = lastPolishedLocale != nil && lastPolishedLocale != locale
         polished = polished.isEmpty ? c : ((sentenceEnd || langChanged) ? polished + "\n\n" + c : glue(polished, c))
