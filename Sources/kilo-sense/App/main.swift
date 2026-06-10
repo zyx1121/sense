@@ -42,6 +42,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusBar: StatusBarController?
     private var pushToTalk: PushToTalk?
     private var meetingMode: MeetingMode?
+    private let speakerTimeline = SpeakerTimeline()
+    private var speakerPump: SpeakerDiarizerPump?
 
     func applicationDidFinishLaunching(_: Notification) {
         Task.detached { _ = CodexAgent.shellPath }  // 背景預熱 codex PATH 解析（GUI app 貧瘠環境用）
@@ -121,7 +123,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let polisher = TranscriptPolisher(store: transcript, archiver: TranscriptArchiver())
         logErr("逐字稿整理模型：\(polisher.backendName)")
-        let controller = AgentController(store: transcript, agent: agent, metrics: metrics, polisher: polisher)
+        let controller = AgentController(store: transcript, agent: agent, metrics: metrics,
+                                         polisher: polisher, speakers: speakerTimeline)
         self.agentController = controller
         let win = SummaryWindow(store: transcript, controller: controller)
         win.show()
@@ -150,8 +153,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 for t in transcribers { try await t.setUp() }
                 let audio = try await startAudioWithRetry()
                 logErr("就緒，聽取中…")
+                // streamSeconds = ASR 時間軸（audioTimeRange 的時鐘）— 分人對時用
+                var streamSeconds: Double = 0
+                var feeding = false
                 for await buffer in audio {
                     for t in transcribers { try await t.stream(buffer) }
+                    if meetingMode?.isOn == true {  // 分人只在會議中跑（diarizer 推理 + model 常駐）
+                        let pump = speakerPump ?? SpeakerDiarizerPump(timeline: speakerTimeline)
+                        speakerPump = pump
+                        pump.enqueue(buffer, streamSeconds: streamSeconds)
+                        feeding = true
+                    } else if feeding {
+                        feeding = false
+                        speakerPump?.pause()
+                    }
+                    streamSeconds += Double(buffer.pcm.frameLength) / buffer.pcm.format.sampleRate
                 }
             } catch {
                 logErr("error: \(error)")

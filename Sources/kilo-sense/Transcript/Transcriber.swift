@@ -7,12 +7,13 @@ enum TranscriberError: Error {
     case noAudioFormat
 }
 
-/// 一路 ASR 的單筆結果：哪個語言、是否定稿、run 平均信心。
+/// 一路 ASR 的單筆結果：哪個語言、是否定稿、run 平均信心、音訊時間範圍。
 struct ASRResult {
     let locale: String        // bcp47，如 "zh-TW"
     let text: String
     let isFinal: Bool
     let confidence: Double?   // .transcriptionConfidence run 平均；沒有就 nil
+    let timeRange: CMTimeRange?  // 相對 analyzer 輸入流起點 — 分人對時用
 }
 
 /// SpeechAnalyzer + SpeechTranscriber 包裝：單一 locale 一路，結果統一走 onResult。
@@ -64,7 +65,8 @@ final class Transcriber {
                         locale: localeID,
                         text: text,
                         isFinal: result.isFinal,
-                        confidence: Self.meanConfidence(result.text)))
+                        confidence: Self.meanConfidence(result.text),
+                        timeRange: Self.timeRange(result.text)))
                 }
             } catch {
                 FileHandle.standardError.write(Data("results error [\(localeID)]: \(error)\n".utf8))
@@ -72,6 +74,13 @@ final class Transcriber {
         }
 
         try await analyzer.start(inputSequence: inputSequence)
+    }
+
+    /// 整筆結果的音訊時間範圍（首 run 起點 → 末 run 終點；可能整串沒有 → nil）。
+    private static func timeRange(_ text: AttributedString) -> CMTimeRange? {
+        let ranges = text.runs.compactMap(\.audioTimeRange)
+        guard let first = ranges.first, let last = ranges.last else { return nil }
+        return CMTimeRange(start: first.start, end: last.end)
     }
 
     /// run 平均信心（以字元數加權；volatile 可能整串沒有 → nil）。
