@@ -48,7 +48,7 @@ final class TranscriptPolisher {
     private let model = "gpt-5.4-mini"
     private var running = false
     private var idleTask: Task<Void, Never>?
-    private let pairLogger = PolishPairLogger()  // 蒸餾訓練料：(raw → cleaned) 配對累積
+    private let pairLogger = PolishPairLogger()  // 語料本金：(raw → cleaned) 配對累積
 
     var backendName: String { apiKey == nil ? "無（原文直出）" : model }
 
