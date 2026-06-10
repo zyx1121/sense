@@ -78,17 +78,18 @@ final class TranscriptPolisher {
         running = true
         idleTask?.cancel()
         let tail = String(store.polished.suffix(120))
+        let epoch = store.transcriptEpoch  // 清除畫面時這批只進歸檔、不上畫面
         Task {
             var committed: String?
             do {
                 let cleaned = try await polish(chunk: run.text, locale: run.locale, contextTail: tail)
-                committed = store.commitPolished(cleaned.isEmpty ? run.text : cleaned, locale: run.locale, consumedSegments: run.segments, source: run.source)
+                committed = store.commitPolished(cleaned.isEmpty ? run.text : cleaned, locale: run.locale, consumedSegments: run.segments, source: run.source, epoch: epoch)
                 Telemetry.polish.info("polished [\(run.locale, privacy: .public)] \(run.text.count, privacy: .public) -> \(cleaned.count, privacy: .public) chars")
                 if !cleaned.isEmpty {
                     pairLogger.log(raw: run.text, cleaned: cleaned, locale: run.locale, contextTail: tail)
                 }
             } catch {
-                committed = store.commitPolished(run.text, locale: run.locale, consumedSegments: run.segments, source: run.source)  // 原文轉正，不卡顯示
+                committed = store.commitPolished(run.text, locale: run.locale, consumedSegments: run.segments, source: run.source, epoch: epoch)  // 原文轉正，不卡顯示
                 Telemetry.polish.error("polish failed: \(error.localizedDescription, privacy: .public)")
             }
             if let committed { archiver.append(committed, source: run.source) }  // 持久化（整理後的定稿）
