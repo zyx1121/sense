@@ -124,7 +124,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let polisher = TranscriptPolisher(store: transcript, archiver: TranscriptArchiver())
         logErr("逐字稿整理模型：\(polisher.backendName)")
         let controller = AgentController(store: transcript, agent: agent, metrics: metrics,
-                                         polisher: polisher, speakers: speakerTimeline)
+                                         polisher: polisher, speakers: speakerTimeline,
+                                         isMeeting: { [weak self] in self?.meetingMode?.isOn == true })
         self.agentController = controller
         let win = SummaryWindow(store: transcript, controller: controller)
         win.show()
@@ -156,18 +157,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // streamSeconds = ASR 時間軸（audioTimeRange 的時鐘）— 分人對時用
                 var streamSeconds: Double = 0
                 var feeding = false
+                // 近 5 秒音訊環形暫存 — ASR 結果比語音本身晚 ~1s，gate 開啟瞬間回灌
+                // lead-in，分人才不會漏掉每段語音的開頭。
+                var ring: [(buf: PCMBuffer, at: Double, dur: Double)] = []
                 for await buffer in audio {
                     for t in transcribers { try await t.stream(buffer) }
-                    if meetingMode?.isOn == true {  // 分人只在會議中跑（diarizer 推理 + model 常駐）
+                    let dur = Double(buffer.pcm.frameLength) / buffer.pcm.format.sampleRate
+                    // speech gate：會議中恆開；其他時候近 30s 有 ASR 結果才餵（音樂/靜音不白燒推理）
+                    let gateOpen = meetingMode?.isOn == true
+                        || Date().timeIntervalSince(transcript.lastSpeechAt) < 30
+                    if gateOpen {
                         let pump = speakerPump ?? SpeakerDiarizerPump(timeline: speakerTimeline)
                         speakerPump = pump
+                        if !feeding {
+                            feeding = true
+                            for r in ring { pump.enqueue(r.buf, streamSeconds: r.at) }
+                            ring.removeAll()
+                        }
                         pump.enqueue(buffer, streamSeconds: streamSeconds)
-                        feeding = true
-                    } else if feeding {
-                        feeding = false
-                        speakerPump?.pause()
+                    } else {
+                        if feeding {
+                            feeding = false
+                            speakerPump?.pause()
+                        }
+                        ring.append((buffer, streamSeconds, dur))
+                        while ring.reduce(0, { $0 + $1.dur }) > 5 { ring.removeFirst() }
                     }
-                    streamSeconds += Double(buffer.pcm.frameLength) / buffer.pcm.format.sampleRate
+                    streamSeconds += dur
                 }
             } catch {
                 logErr("error: \(error)")
