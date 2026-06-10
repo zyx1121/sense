@@ -60,15 +60,39 @@ flowchart TD
 
 > 🟩 **on-device** — sensing + UI; system audio never leaves your Mac. 🟦 **cloud** — your own OpenAI key / codex CLI (cleanup + reasoning only). 🟨 **local** — everything persists under `~/.kilo`.
 
-## Pipeline
+## Transcription pipeline
 
+```mermaid
+flowchart TD
+    audio["🔊 System audio<br/>ScreenCaptureKit · 16 kHz mono"]
+    asr["🍎 Apple ASR — SpeechAnalyzer<br/>zh-TW + en-US, both running at once"]
+    router["⚖️ Language referee — LanguageRouter<br/>per-final confidence EMA + hysteresis, one path wins"]
+    draft["Draft text (volatile — may still be rewritten)<br/>notch grey + window dim tail, display only"]
+    queue["📥 Final-text queue (already on screen in grey)<br/>flush on: 60 chars · language switch · 4 s idle"]
+    polish["☁️ Cleanup — gpt-5.4-mini<br/>punctuation + mis-recognition fixes<br/>the only cloud hop; on failure raw passes through"]
+    post["🔧 Deterministic post-processing<br/>paragraph breaks · seam stitching · echo dedup"]
+    white["⚪ Polished transcript — white text"]
+    archive[("~/.kilo/transcripts/<br/>YYYY-MM-DD.md")]
+    pairs[("~/.kilo/training/polish-pairs.jsonl<br/>raw → cleaned corpus")]
+
+    audio --> asr --> router
+    router -->|volatile| draft
+    router -->|final| queue
+    queue --> polish --> post --> white
+    white --> archive
+    polish -.->|raw ≠ cleaned| pairs
+
+    classDef device fill:#e6f4ea,stroke:#34a853,color:#0b3d20;
+    classDef cloud fill:#e8f0fe,stroke:#4285f4,color:#0b2a5b;
+    classDef store fill:#fef7e0,stroke:#f9ab00,color:#5b4300;
+    class audio,asr,router,draft,queue,post,white device;
+    class polish cloud;
+    class archive,pairs store;
 ```
-system audio (ScreenCaptureKit) ─→ SpeechAnalyzer ─→ notch captions (volatile/final)
-                                      │
-                                      └→ continuous transcript ─→ small-model cleanup (gpt-5.4-mini)
-                                                                        │
-cursor shake ─→ dim + AX spotlight ─→ click to capture ── chips ──────→ codex exec (resume session) ─→ feed
-```
+
+Apple's recognizer emits each utterance twice: first as **volatile** drafts that it keeps rewriting while you speak, then as a **final**. Volatile text is display-only — grey in the notch, dim tail in the window. Finals queue up and are cleaned in batches; a batch flushes on whichever comes first: **60 chars accumulated**, a **language switch**, or **4 s of silence**.
+
+Why batch instead of cleaning every final? Micro-batching (size-or-idle, the same shape as Kafka's `batch.size` + `linger.ms`) buys three things: more context per chunk (typo fixes need surrounding words), fewer batch seams (every seam needs stitching and dedup guards), and fewer API round-trips. It costs almost nothing perceptually — raw finals are already readable the moment they land; cleanup just upgrades them from grey to white a few seconds later. The LLM only does what is genuinely uncertain (punctuation, mis-recognitions); everything that can be deterministic (paragraph breaks, stitching, dedup) is plain code.
 
 ## Running it (no Xcode)
 

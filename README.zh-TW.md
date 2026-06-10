@@ -60,15 +60,39 @@ flowchart TD
 
 > 🟩 **on-device** — 感知 + UI；系統音訊不離開你的 Mac。 🟦 **cloud** — 你自己的 OpenAI key / codex CLI（只做潤稿 + 推理）。 🟨 **本機** — 全部落在 `~/.kilo`。
 
-## Pipeline
+## 轉錄 pipeline
 
+```mermaid
+flowchart TD
+    audio["🔊 系統音訊<br/>ScreenCaptureKit · 16 kHz mono"]
+    asr["🍎 Apple 語音辨識 — SpeechAnalyzer<br/>中英兩路同時跑"]
+    router["⚖️ 語言裁判 — LanguageRouter<br/>逐筆定稿信心 EMA + 遲滯，只放行一路"]
+    draft["草稿字（volatile — 還會被改寫）<br/>瀏海灰字 + 視窗淡灰尾，只顯示不落地"]
+    queue["📥 定稿佇列（中灰，這時已看得到字）<br/>出隊：攢滿 60 字 · 語言切換 · 停話 4 秒"]
+    polish["☁️ 清稿 — gpt-5.4-mini<br/>補標點 + 修辨識錯字<br/>全程唯一上雲的一步；失敗原文照用"]
+    post["🔧 確定性後處理<br/>分段 · 接縫接合 · 防抄去重"]
+    white["⚪ 整理完的逐字稿 — 白字"]
+    archive[("~/.kilo/transcripts/<br/>YYYY-MM-DD.md")]
+    pairs[("~/.kilo/training/polish-pairs.jsonl<br/>原文 → 清稿 語料")]
+
+    audio --> asr --> router
+    router -->|volatile| draft
+    router -->|final| queue
+    queue --> polish --> post --> white
+    white --> archive
+    polish -.->|原文 ≠ 清稿| pairs
+
+    classDef device fill:#e6f4ea,stroke:#34a853,color:#0b3d20;
+    classDef cloud fill:#e8f0fe,stroke:#4285f4,color:#0b2a5b;
+    classDef store fill:#fef7e0,stroke:#f9ab00,color:#5b4300;
+    class audio,asr,router,draft,queue,post,white device;
+    class polish cloud;
+    class archive,pairs store;
 ```
-系統音訊 (ScreenCaptureKit) ─→ SpeechAnalyzer ─→ 瀏海字幕 (volatile/final)
-                                      │
-                                      └→ 連續逐字稿 ─→ 小模型整理 (gpt-5.4-mini)
-                                                            │
-晃游標 ─→ dim + AX spotlight ─→ 點擊圈選 ──── chips ──────→ codex exec（resume session）─→ feed
-```
+
+Apple 辨識引擎每段話會吐兩次：先是**草稿（volatile）**——邊聽邊回頭改寫，講完才給**定稿（final）**。草稿只負責顯示——瀏海灰字、視窗淡灰尾巴，不落地。定稿進佇列攢批整理，三個條件先到先觸發：**攢滿 60 字**、**語言切換**、**停話 4 秒**。
+
+為什麼攢批、不逐筆清？Micro-batching（滿量-或-閒置，跟 Kafka 的 `batch.size` + `linger.ms` 同款）換到三件事：單批上下文更厚（修錯字要靠前後文）、接縫更少（每個接縫都要接合與去重防線）、API 來回更少。而體感代價趨近零——定稿一落地就以灰字上畫面可讀，清稿只是幾秒後把它升級成白字。LLM 只做真正不確定的（標點、辨識錯字）；能確定的（分段、接合、去重）全是程式碼。
 
 ## 跑起來（不開 Xcode）
 
