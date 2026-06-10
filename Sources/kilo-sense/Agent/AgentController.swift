@@ -32,17 +32,34 @@ final class AgentController {
     private let metrics: MetricsStore
     private let polisher: TranscriptPolisher
     private let speakers: SpeakerTimeline
+    private let isMeeting: () -> Bool
     private let sources = SourceTracker()
     private let screenCapturer = Capturer()
     private var threadID: String?  // codex session，app 重啟歸零
 
     init(store: TranscriptStore, agent: CodexAgent?, metrics: MetricsStore,
-         polisher: TranscriptPolisher, speakers: SpeakerTimeline) {
+         polisher: TranscriptPolisher, speakers: SpeakerTimeline,
+         isMeeting: @escaping () -> Bool = { false }) {
         self.store = store
         self.agent = agent
         self.metrics = metrics
         self.polisher = polisher
         self.speakers = speakers
+        self.isMeeting = isMeeting
+        // 講者標籤延後到 polisher 取批時解析（diarizer 收斂比 final 慢，commit 當下查常落空）
+        store.speakerResolver = { [weak self] range in
+            guard let self else { return nil }
+            let meeting = self.isMeeting()
+            return self.speakers.dominantLabel(
+                start: range.start.seconds, end: range.end.seconds,
+                prefix: meeting ? "對方" : "講者",
+                requireMultipleSpeakers: !meeting)
+        }
+    }
+
+    /// 系統音訊有 ASR 結果（含 volatile）— 分人 speech gate 的訊號源。
+    func noteSpeech() {
+        store.lastSpeechAt = Date()
     }
 
     /// 辨識中的 volatile → overlay 灰字尾巴（打字機）。
@@ -51,15 +68,10 @@ final class AgentController {
     }
 
     /// 每段定稿進逐字稿（顯示 + codex context），並戳 polisher 整理。
-    /// 來源：分人時間軸蓋到這段 → 「對方 A」式講者標籤（只在會議模式有 diarizer 餵食時成立）；
-    /// 否則 fallback 前景 app。locale 跟著進 pending（整理選對指令語言）。
+    /// 帶 timeRange 進 pending — 講者標籤在 polisher 取批時才解析（speakerResolver），
+    /// 這裡只記 fallback 來源（前景 app）。locale 跟著進 pending（整理選對指令語言）。
     func appendFinal(_ text: String, locale: String, timeRange: CMTimeRange? = nil) {
-        var source = sources.current()
-        if let tr = timeRange,
-           let label = speakers.dominantLabel(start: tr.start.seconds, end: tr.end.seconds) {
-            source = label
-        }
-        store.commitFinal(text, locale: locale, source: source)
+        store.commitFinal(text, locale: locale, source: sources.current(), timeRange: timeRange)
         metrics.recordSegment(chars: text.count)
         polisher.nudge()
     }

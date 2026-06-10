@@ -41,6 +41,7 @@ final class LanguageRouter {
     }
 
     func handle(_ r: ASRResult) {
+        controller.noteSpeech()  // 任何 ASR 結果 = 系統音訊有語音 — 分人 speech gate 的訊號
         if r.isFinal {
             if let c = r.confidence {
                 ema[r.locale] = alpha * c + (1 - alpha) * (ema[r.locale] ?? c)

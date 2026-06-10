@@ -1,3 +1,4 @@
+import CoreMedia
 import Foundation
 
 /// Kilo feed 的一個步驟：使用者指令 / tool 執行 / 回應 / 錯誤。
@@ -79,12 +80,13 @@ func glue(_ a: String, _ b: String) -> String {
     return a + b
 }
 
-/// 待整理的一段定稿 — 帶語言標籤（polisher 按語言分批整理，指令語言跟著走才不會被翻譯）
-/// 與來源（前景 app / 視窗標題，歸檔時標出處）。
+/// 待整理的一段定稿 — 帶語言標籤（polisher 按語言分批整理，指令語言跟著走才不會被翻譯）、
+/// 來源（前景 app / 視窗標題，歸檔時標出處）與音訊時間範圍（講者標籤延後解析用）。
 struct PendingSegment {
     let locale: String   // bcp47，如 "zh-TW"
     let text: String
-    let source: String?
+    let source: String?  // fallback 來源（前景 app）；講者標籤在讀取時才解析
+    var timeRange: CMTimeRange? = nil
 }
 
 /// 逐字稿連續文件流 + Kilo agent 步驟 feed。window 顯示、codex agent 讀來思考。
@@ -114,6 +116,14 @@ final class TranscriptStore {
     /// PTT 放開後的尾段窗（遲到 final 還算 PTT 的）— 會議模式靠這個避開「對 Kilo 說的話進會議記錄」。
     var pttTailUntil = Date.distantPast
 
+    /// 系統音訊最近一次 ASR 結果（volatile 也算）— 分人的 speech gate 用：有語音才餵 diarizer。
+    var lastSpeechAt = Date.distantPast
+
+    /// 講者標籤解析器（AgentController 注入）。在 firstPendingRun 讀取時才呼叫 —
+    /// diarizer 收斂比 ASR final 慢 ~0.3-10s，commit 當下查常落空；
+    /// polisher 取批至少在 4s idle / 湊字之後，那時 segment 已就位。
+    var speakerResolver: ((CMTimeRange) -> String?)?
+
     // — overlay 可見性：shake / 打字 / agent 活動 / hover 續命，閒置自動收合 —
     // 聲音（逐字稿流入）刻意不續命：那是 notch 的展開條件，overlay 只跟「使用者在動它」走。
     private(set) var overlayShown = true
@@ -133,30 +143,40 @@ final class TranscriptStore {
         pumpVolatile()
     }
 
-    func commitFinal(_ text: String, locale: String, source: String? = nil) {
+    func commitFinal(_ text: String, locale: String, source: String? = nil,
+                     timeRange: CMTimeRange? = nil) {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         volatileTask?.cancel(); volatileTask = nil
         volatileTarget = ""; volatileShown = ""
         guard !t.isEmpty else { return }
-        pending.append(PendingSegment(locale: locale, text: t, source: source))  // 一筆 final 一段，不合併 — polisher 按段消耗才不會吃到飛中的新字
+        pending.append(PendingSegment(locale: locale, text: t, source: source,
+                                      timeRange: timeRange))  // 一筆 final 一段，不合併 — polisher 按段消耗才不會吃到飛中的新字
         while pendingRaw.count > 12000, !pending.isEmpty { pending.removeFirst() }  // 無 polisher 時的安全閥
     }
 
     /// pending 開頭「同語言、同來源的連續段」— polisher 的一個整理批次。
     /// 來源也斷批：會議模式我（mic）/ 對方（系統音）交錯時，批次混源會讓歸檔的
     /// 出處標頭張冠李戴。boundary = 後面接著別的語言或來源（提示 polisher 別等湊字數、快點沖掉）。
+    /// 來源在這裡（讀取時）才解析講者標籤 — 見 speakerResolver 註解。
     func firstPendingRun() -> (locale: String, text: String, segments: Int, boundary: Bool, source: String?)? {
         guard let first = pending.first else { return nil }
+        let firstSource = resolvedSource(first)
         var text = first.text
         var n = 1
         for seg in pending.dropFirst() {
-            guard seg.locale == first.locale, seg.source == first.source else {
-                return (first.locale, text, n, true, first.source)
+            guard seg.locale == first.locale, resolvedSource(seg) == firstSource else {
+                return (first.locale, text, n, true, firstSource)
             }
             text = glue(text, seg.text)
             n += 1
         }
-        return (first.locale, text, n, false, first.source)
+        return (first.locale, text, n, false, firstSource)
+    }
+
+    /// 段落的有效來源：講者標籤（時間範圍查得到）優先，否則 fallback 收錄當下的前景 app。
+    private func resolvedSource(_ seg: PendingSegment) -> String? {
+        if let tr = seg.timeRange, let label = speakerResolver?(tr) { return label }
+        return seg.source
     }
 
     private var lastPolishedLocale: String?

@@ -76,19 +76,23 @@ actor SpeakerDiarizerPump {
     }
 
     private func ingest(_ update: DiarizerTimelineUpdate) {
-        let new = update.finalizedSegments.map {
+        func convert(_ s: DiarizerSegment) -> SpeakerTimeline.Segment {
             SpeakerTimeline.Segment(
-                speaker: String($0.speakerIndex),
-                start: offset + Double($0.startTime),
-                end: offset + Double($0.endTime))
+                speaker: String(s.speakerIndex),
+                start: offset + Double(s.startTime),
+                end: offset + Double(s.endTime))
         }
-        guard !new.isEmpty else { return }
+        let new = update.finalizedSegments.map(convert)
+        // 暫定段（近即時、會被修訂）每次整批換新 — ASR final 立即 kick 的長句靠它們
+        // 才查得到講者；定稿段一到，下次 update 的暫定段自然不再涵蓋該區間。
+        let tentative = update.tentativeSegments.map(convert)
+        guard !new.isEmpty || !tentative.isEmpty else { return }
         for s in new {  // segment 級觀測：diarizer 到底分出幾個講者、時間段落在哪
             Telemetry.meeting.info("segment spk=\(s.speaker, privacy: .public) \(s.start, format: .fixed(precision: 1), privacy: .public)s–\(s.end, format: .fixed(precision: 1), privacy: .public)s")
         }
         segments.append(contentsOf: new)
         if segments.count > 600 { segments.removeFirst(segments.count - 600) }  // 留近段就夠查
-        let snapshot = segments
+        let snapshot = segments + tentative
         let timeline = timeline
         Task { @MainActor in timeline.update(snapshot) }
     }
@@ -115,14 +119,21 @@ final class SpeakerTimeline {
         segments = s
     }
 
-    /// time range 內重疊最多的說話者 → 「對方 A」式標籤；沒蓋到 → nil（fallback 前景 app）。
-    func dominantLabel(start: Double, end: Double) -> String? {
+    /// time range 內重疊最多的說話者 → 「對方 A / 講者 A」式標籤；沒蓋到 → nil（fallback 前景 app）。
+    /// requireMultipleSpeakers：近 120s 要看得到 ≥2 個講者才標 — 單講者內容（獨白影片）
+    /// 保留 app 標題那個更有資訊量的來源，標「講者 A」反而是降級。
+    func dominantLabel(start: Double, end: Double, prefix: String,
+                       requireMultipleSpeakers: Bool) -> String? {
+        if requireMultipleSpeakers {
+            let recent = Set(segments.filter { $0.end > end - 120 }.map(\.speaker))
+            guard recent.count >= 2 else { return nil }
+        }
         var overlap: [String: Double] = [:]
         for seg in segments where seg.end > start && seg.start < end {
             overlap[seg.speaker, default: 0] += min(seg.end, end) - max(seg.start, start)
         }
         guard let best = overlap.max(by: { $0.value < $1.value }), best.value > 0 else { return nil }
-        return "對方 \(letter(for: best.key))"
+        return "\(prefix) \(letter(for: best.key))"
     }
 
     private func letter(for speaker: String) -> String {
