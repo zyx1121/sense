@@ -55,7 +55,7 @@ final class StatusBarController: NSObject {
         menu.addItem(title)
         menu.addItem(.separator())
 
-        let meeting = add(menu, "會議模式（錄下我的發言）", #selector(toggleMeeting))
+        let meeting = add(menu, "會議模式（錄下我的發言）", #selector(toggleMeeting), key: "m")
         meeting.state = meetingOn ? .on : .off
 
         add(menu, "開啟逐字稿資料夾", #selector(openTranscripts))

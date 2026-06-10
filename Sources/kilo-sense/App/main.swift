@@ -55,8 +55,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         startPipeline()
         startPushToTalk()
         setUpMeetingMode()
-        // LLM 講者命名：背景低頻把「講者 A」進化成「小明 / 旁白」（無 key 自動停用）
+        // LLM 講者命名：背景低頻把「講者 A」進化成「小明 / 旁白」（無 key 自動停用），
+        // 推出真名後 enroll 聲紋 → 跨內容/跨啟動直接認人
         let enricher = AttributionEnricher(store: transcript, timeline: speakerTimeline)
+        enricher.pumpProvider = { [weak self] in self?.speakerPump }
         enricher.start()
         self.enricher = enricher
     }

@@ -17,6 +17,12 @@ final class AttributionEnricher {
     private var running = false
     private var pollTask: Task<Void, Never>?
 
+    /// 聲紋註冊入口（main.swift 接 SpeakerDiarizerPump）— 推出真名後把該講者聲音 enroll，
+    /// 之後跨內容/跨啟動由 diarizer 直接認人，不再經 LLM。
+    var pumpProvider: (() -> SpeakerDiarizerPump?)?
+    /// 上一輪的 letter→name 提案 — enroll 的一致性閘用。
+    private var lastNameProposals: [String: String] = [:]
+
     init(store: TranscriptStore, timeline: SpeakerTimeline) {
         self.store = store
         self.timeline = timeline
@@ -108,6 +114,18 @@ final class AttributionEnricher {
         }
         timeline.setDisplayNames(names)
         Telemetry.enrich.info("speaker map: \(names.map { "\($0.key)→\($0.value)" }.sorted().joined(separator: " "), privacy: .public)")
+        // 閉環：推出真名 → 聲紋註冊。一致性閘：同一 letter→name 連續兩輪一致才 enroll —
+        // mini 有 variance，單輪鏡像錯置會把錯名字燒進「持久的」聲紋庫
+        //（displayNames 全量覆蓋可自癒，enroll 不行）。pump 內部另有 dedupe 與樣本量檢查。
+        var proposals: [String: String] = [:]
+        for a in accepted where a.name != nil { proposals[a.letter] = a.name! }
+        for (letter, name) in proposals where lastNameProposals[letter] == name {
+            let ranges = timeline.segmentRanges(forLetter: letter)
+            guard !ranges.isEmpty else { continue }
+            Telemetry.enrich.info("enroll gate passed \(letter, privacy: .public)→\(name, privacy: .public)（連續兩輪一致）")
+            pumpProvider?()?.requestEnroll(name: name, ranges: ranges)
+        }
+        lastNameProposals = proposals
     }
 
     /// 去標點、去空白、lowercase — 引句比對用的正規化。
@@ -124,7 +142,10 @@ final class AttributionEnricher {
             - 稱呼語邏輯（最重要，想清楚再答）：講者句中出現的名字幾乎都是「對方」的名字 — \
             呼喚（「Sarah, 請說」）、感謝（「Thank you David」）、介紹來賓，都是在說別人；\
             把那個名字綁給「被稱呼的那一方」，不是說話者自己。\
-            只有自我介紹（「我是 X」/ "I am X" / "my name is X"）才能把名字綁到說話者本人
+            只有自我介紹（「我是 X」/ "I am X" / "my name is X"）才能把名字綁到說話者本人。\
+            完整示例：講者 A 說「Sarah, tell us about…」、講者 B 說「Thank you David」\
+            → A 在呼喚 Sarah，所以 Sarah 是 B；B 在感謝 David，所以 David 是 A。\
+            結論：A=David、B=Sarah — 不要反過來
             - 名字必須是逐字稿文字中實際出現過的字串，沒有就 null，絕不編造
             - 每個非 null 的 name 都要給 evidence：逐字稿中支持這個綁定的原句
             - 角色四選一：主持人、來賓、旁白、講者（旁白 = 無對話對象的敘述者；無法判斷用講者）

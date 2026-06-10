@@ -13,6 +13,7 @@ actor SpeakerDiarizerPump {
     private enum Feed {
         case audio(PCMBuffer, streamSeconds: Double)
         case gap   // 會議關閉 → 下次恢復重算 offset
+        case enroll(name: String, ranges: [(start: Double, end: Double)])  // 命名 → 聲紋註冊
     }
 
     private let timeline: SpeakerTimeline
@@ -23,6 +24,9 @@ actor SpeakerDiarizerPump {
     private var offset: Double = 0
     private var idle = true
     private var segments: [SpeakerTimeline.Segment] = []
+    // 近 120s 原始音訊（stream 時間索引）— 聲紋註冊要回撈該講者的片段
+    private var ring: [(samples: [Float], start: Double)] = []
+    private var enrolledNames: Set<String> = []
 
     init(timeline: SpeakerTimeline) {
         self.timeline = timeline
@@ -40,6 +44,11 @@ actor SpeakerDiarizerPump {
         intake.yield(.gap)
     }
 
+    /// LLM 推出名字 → 註冊聲紋（與音訊同佇列依序處理，diarizer 無並發競態）。
+    nonisolated func requestEnroll(name: String, ranges: [(start: Double, end: Double)]) {
+        intake.yield(.enroll(name: name, ranges: ranges))
+    }
+
     private func run() async {
         for await item in queue {
             switch item {
@@ -47,6 +56,8 @@ actor SpeakerDiarizerPump {
                 idle = true
             case .audio(let buffer, let streamSeconds):
                 await consume(buffer, streamSeconds: streamSeconds)
+            case .enroll(let name, let ranges):
+                enroll(name: name, ranges: ranges)
             }
         }
     }
@@ -59,12 +70,15 @@ actor SpeakerDiarizerPump {
                 try await d.initialize(variant: .dihard3)
                 diarizer = d
                 Telemetry.meeting.info("diarizer ready")
+                reenrollSavedVoices(d)  // 開機把 ~/.kilo/voices 的聲紋註冊回去 — 跨 session 認人
             }
             guard let diarizer, let samples = Self.samples(buffer.pcm) else { return }
             if idle {
                 offset = streamSeconds - fedSeconds
                 idle = false
             }
+            ring.append((samples, streamSeconds))
+            while ring.reduce(0, { $0 + $1.samples.count }) > 120 * 16_000 { ring.removeFirst() }
             try diarizer.addAudio(samples, sourceSampleRate: 16_000)
             fedSeconds += Double(samples.count) / 16_000
             if let update = try diarizer.process() {
@@ -75,10 +89,64 @@ actor SpeakerDiarizerPump {
         }
     }
 
+    // MARK: - 聲紋註冊（LLM 命名 → enroll → 跨 session 直接認人）
+
+    /// 從 ring 撈該講者的片段音訊註冊聲紋。enroll 會 reset diarizer 內部 timeline
+    ///（時鐘歸零）— 成功後重置 fedSeconds 並重算 offset，匿名字母/名字映射也清掉重排。
+    private func enroll(name: String, ranges: [(start: Double, end: Double)]) {
+        guard let diarizer, !enrolledNames.contains(name) else { return }
+        var collected: [Float] = []
+        for r in ranges.reversed() {  // 新的片段優先
+            for chunk in ring {
+                let chunkEnd = chunk.start + Double(chunk.samples.count) / 16_000
+                let s = max(r.start, chunk.start), e = min(r.end, chunkEnd)
+                guard e > s else { continue }
+                let from = Int((s - chunk.start) * 16_000), to = Int((e - chunk.start) * 16_000)
+                collected.append(contentsOf: chunk.samples[max(0, from)..<min(chunk.samples.count, to)])
+            }
+            if collected.count >= 15 * 16_000 { break }
+        }
+        guard collected.count >= 3 * 16_000 else {
+            Telemetry.enrich.info("enroll skipped \(name, privacy: .public) — 聲音樣本不足 \(collected.count / 16_000, privacy: .public)s")
+            return
+        }
+        do {
+            guard try diarizer.enrollSpeaker(withAudio: collected, sourceSampleRate: 16_000,
+                                             named: name) != nil else {
+                Telemetry.enrich.info("enroll rejected \(name, privacy: .public)")
+                return
+            }
+            enrolledNames.insert(name)
+            fedSeconds = 0; idle = true   // enroll reset 了 diarizer 時鐘 — 下顆 buffer 重算 offset
+            VoiceStore.save(name: name, samples: collected)
+            let timeline = timeline
+            Task { @MainActor in timeline.resetAnonymous() }  // slot 重排，舊字母映射作廢
+            Telemetry.enrich.info("enrolled \(name, privacy: .public)（\(collected.count / 16_000, privacy: .public)s 聲紋,已存 voices/）")
+        } catch {
+            Telemetry.enrich.error("enroll failed \(name, privacy: .public): \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// 開機 re-enroll：diarizer 不提供 embedding 匯出,聲紋以原始音訊形式持久化、每次啟動重註冊。
+    private func reenrollSavedVoices(_ d: LSEENDDiarizer) {
+        for (name, samples) in VoiceStore.loadAll() {
+            do {
+                if try d.enrollSpeaker(withAudio: samples, sourceSampleRate: 16_000, named: name) != nil {
+                    enrolledNames.insert(name)
+                    Telemetry.enrich.info("re-enrolled \(name, privacy: .public)")
+                }
+            } catch {
+                Telemetry.enrich.error("re-enroll failed \(name, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
     private func ingest(_ update: DiarizerTimelineUpdate) {
+        // 已 enroll 的講者 slot 直接帶名字（「David」），匿名 slot 維持數字 → timeline 配字母
+        let names = diarizer?.timeline.speakers.compactMapValues(\.name) ?? [:]
         func convert(_ s: DiarizerSegment) -> SpeakerTimeline.Segment {
             SpeakerTimeline.Segment(
-                speaker: String(s.speakerIndex),
+                speaker: names[s.speakerIndex] ?? String(s.speakerIndex),
                 start: offset + Double(s.startTime),
                 end: offset + Double(s.endTime))
         }
@@ -100,6 +168,28 @@ actor SpeakerDiarizerPump {
     private static func samples(_ pcm: AVAudioPCMBuffer) -> [Float]? {
         guard let p = pcm.floatChannelData, pcm.frameLength > 0 else { return nil }
         return Array(UnsafeBufferPointer(start: p[0], count: Int(pcm.frameLength)))
+    }
+}
+
+/// 聲紋持久化：~/.kilo/voices/<name>.f32（16k mono Float32 raw）。
+/// 存音訊不存 embedding — FluidAudio 不開放 embedding 匯出，且原始音訊跨 model 版本可重derive。
+enum VoiceStore {
+    static var dir: String { kiloWorkdir + "/voices" }
+
+    static func save(name: String, samples: [Float]) {
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        let safe = name.replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: ":", with: "_")
+        let data = samples.withUnsafeBufferPointer { Data(buffer: $0) }
+        try? data.write(to: URL(fileURLWithPath: "\(dir)/\(safe).f32"))
+    }
+
+    static func loadAll() -> [(name: String, samples: [Float])] {
+        guard let files = try? FileManager.default.contentsOfDirectory(atPath: dir) else { return [] }
+        return files.filter { $0.hasSuffix(".f32") }.compactMap { file in
+            guard let data = try? Data(contentsOf: URL(fileURLWithPath: "\(dir)/\(file)")) else { return nil }
+            let samples = data.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
+            return (String(file.dropLast(4)), samples)
+        }
     }
 }
 
@@ -134,22 +224,44 @@ final class SpeakerTimeline {
         return displayNames.first(where: { $0.value == label })?.key
     }
 
-    /// time range 內重疊最多的說話者 → 「對方 A / 講者 A」式標籤；沒蓋到 → nil（fallback 前景 app）。
-    /// requireMultipleSpeakers：近 120s 要看得到 ≥2 個講者才標 — 單講者內容（獨白影片）
-    /// 保留 app 標題那個更有資訊量的來源，標「講者 A」反而是降級。
+    /// time range 內重疊最多的說話者 → 標籤。已 enroll 的講者（speaker 鍵是名字而非數字）
+    /// 直接回名字、不受 ≥2 講者規則限制 — 認得出身分就值得標，獨白也標。
+    /// 匿名講者：「對方 A / 講者 A」式；requireMultipleSpeakers 時近 120s 要 ≥2 個講者才標 —
+    /// 單講者內容保留 app 標題那個更有資訊量的來源。
     func dominantLabel(start: Double, end: Double, prefix: String,
                        requireMultipleSpeakers: Bool) -> String? {
-        if requireMultipleSpeakers {
-            let recent = Set(segments.filter { $0.end > end - 120 }.map(\.speaker))
-            guard recent.count >= 2 else { return nil }
-        }
         var overlap: [String: Double] = [:]
         for seg in segments where seg.end > start && seg.start < end {
             overlap[seg.speaker, default: 0] += min(seg.end, end) - max(seg.start, start)
         }
         guard let best = overlap.max(by: { $0.value < $1.value }), best.value > 0 else { return nil }
+        if Int(best.key) == nil { return best.key }  // 具名聲紋：鍵即名字
+        if requireMultipleSpeakers {
+            let recent = Set(segments.filter { $0.end > end - 120 }.map(\.speaker))
+            guard recent.count >= 2 else { return nil }
+        }
         let l = letter(for: best.key)
         return displayNames[l] ?? "\(prefix) \(l)"
+    }
+
+    /// enroll 後 diarizer slot 重排 — 匿名映射（字母 / LLM 名）全部作廢重排，
+    /// 下一輪 enrich 會基於新 slot 重建。
+    func resetAnonymous() {
+        letters = [:]
+        displayNames = [:]
+    }
+
+    /// 某字母講者近期的時間片段（給聲紋註冊撈音訊）：新到舊、總長封頂 15s。
+    func segmentRanges(forLetter letter: String) -> [(start: Double, end: Double)] {
+        guard let speaker = letters.first(where: { $0.value == letter })?.key else { return [] }
+        var total = 0.0
+        var out: [(Double, Double)] = []
+        for seg in segments.filter({ $0.speaker == speaker }).sorted(by: { $0.end > $1.end }) {
+            out.append((seg.start, seg.end))
+            total += seg.end - seg.start
+            if total >= 15 { break }
+        }
+        return out
     }
 
     private func letter(for speaker: String) -> String {
