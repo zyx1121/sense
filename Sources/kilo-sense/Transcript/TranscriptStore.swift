@@ -124,6 +124,10 @@ final class TranscriptStore {
     /// polisher 取批至少在 4s idle / 湊字之後，那時 segment 已就位。
     var speakerResolver: ((CMTimeRange) -> String?)?
 
+    /// 近期整理完的輪替（講者標籤 + 內容）— AttributionEnricher 的原料。
+    private(set) var recentTurns: [(source: String?, text: String)] = []
+    private(set) var turnsVersion = 0
+
     // — overlay 可見性：shake / 打字 / agent 活動 / hover 續命，閒置自動收合 —
     // 聲音（逐字稿流入）刻意不續命：那是 notch 的展開條件，overlay 只跟「使用者在動它」走。
     private(set) var overlayShown = true
@@ -186,7 +190,8 @@ final class TranscriptStore {
     /// 換語言一律空行（語言切換必是新段 — 沒標點的雜訊批才不會把下一語言黏進同一行）、
     /// 同語言看句末標點（有 → 空行；無 → 斷句續接）。
     @discardableResult
-    func commitPolished(_ cleaned: String, locale: String, consumedSegments: Int) -> String? {
+    func commitPolished(_ cleaned: String, locale: String, consumedSegments: Int,
+                        source: String? = nil) -> String? {
         pending.removeFirst(min(consumedSegments, pending.count))
         let c = breakLines(trimOverlap(cleaned.trimmingCharacters(in: .whitespacesAndNewlines)))
         guard !c.isEmpty else { return nil }
@@ -195,6 +200,9 @@ final class TranscriptStore {
         polished = polished.isEmpty ? c : ((sentenceEnd || langChanged) ? polished + "\n\n" + c : glue(polished, c))
         lastPolishedLocale = locale
         if polished.count > 12000 { polished = String(polished.suffix(9000)) }
+        recentTurns.append((source, c))  // 輪替史 — enricher 推角色/人名的原料
+        if recentTurns.count > 30 { recentTurns.removeFirst(recentTurns.count - 30) }
+        turnsVersion += 1
         return c  // 實際上稿的文字（裁 echo、斷行後）— 給歸檔用
     }
 

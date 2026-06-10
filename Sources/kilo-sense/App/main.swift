@@ -44,6 +44,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var meetingMode: MeetingMode?
     private let speakerTimeline = SpeakerTimeline()
     private var speakerPump: SpeakerDiarizerPump?
+    private var enricher: AttributionEnricher?
 
     func applicationDidFinishLaunching(_: Notification) {
         Task.detached { _ = CodexAgent.shellPath }  // 背景預熱 codex PATH 解析（GUI app 貧瘠環境用）
@@ -54,6 +55,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         startPipeline()
         startPushToTalk()
         setUpMeetingMode()
+        // LLM 講者命名：背景低頻把「講者 A」進化成「小明 / 旁白」（無 key 自動停用）
+        let enricher = AttributionEnricher(store: transcript, timeline: speakerTimeline)
+        enricher.start()
+        self.enricher = enricher
     }
 
     /// 會議模式：選單列開關 → mic 持續錄（我這側），與系統音訊雙流分轉。

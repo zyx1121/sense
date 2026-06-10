@@ -114,9 +114,24 @@ final class SpeakerTimeline {
 
     private var segments: [Segment] = []
     private var letters: [String: String] = [:]  // speaker id → A/B/C…（首次出現順序）
+    // 字母 → LLM 推出的顯示名（人名或「角色 字母」）— AttributionEnricher 每輪全量覆蓋，
+    // 舊內容淡出後自然被新一輪結果清掉，不會把上個影片的名字套到下一個。
+    private var displayNames: [String: String] = [:]
 
     func update(_ s: [Segment]) {
         segments = s
+    }
+
+    /// AttributionEnricher 寫入：全量覆蓋（沒提到的字母 = 清掉舊名）。
+    func setDisplayNames(_ names: [String: String]) {
+        displayNames = names
+    }
+
+    /// 任意講者標籤還原成字母 —「講者 B / 對方 B」→ B；已命名（「小明」）反查 displayNames。
+    func canonicalLetter(for label: String?) -> String? {
+        guard let label else { return nil }
+        if let m = label.wholeMatch(of: /(?:講者|對方) ([A-Z])/) { return String(m.1) }
+        return displayNames.first(where: { $0.value == label })?.key
     }
 
     /// time range 內重疊最多的說話者 → 「對方 A / 講者 A」式標籤；沒蓋到 → nil（fallback 前景 app）。
@@ -133,7 +148,8 @@ final class SpeakerTimeline {
             overlap[seg.speaker, default: 0] += min(seg.end, end) - max(seg.start, start)
         }
         guard let best = overlap.max(by: { $0.value < $1.value }), best.value > 0 else { return nil }
-        return "\(prefix) \(letter(for: best.key))"
+        let l = letter(for: best.key)
+        return displayNames[l] ?? "\(prefix) \(l)"
     }
 
     private func letter(for speaker: String) -> String {
