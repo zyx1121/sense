@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 
 /// 會議模式：持續錄 mic（你這側的發言）進逐字稿，與系統音訊雙流分轉 —
@@ -43,7 +44,12 @@ final class MeetingMode {
                 }
                 let audio = try await mic.start()
                 guard isOn else { await mic.stop(); return }  // 暖機期間已關閉
+                var n = 0
                 for await buffer in audio {
+                    n += 1
+                    if n % 50 == 1 {  // mic 活性觀測：buffer 有沒有在流、訊號是不是零
+                        Telemetry.meeting.info("mic buffer #\(n, privacy: .public) frames=\(buffer.pcm.frameLength, privacy: .public) rms=\(Self.rms(buffer.pcm), format: .fixed(precision: 4), privacy: .public)")
+                    }
                     try await transcriber?.stream(buffer)
                 }
             } catch {
@@ -63,11 +69,26 @@ final class MeetingMode {
     /// 只收 final 進逐字稿（mic 的 volatile 不跟系統流搶單一 volatile 顯示槽）；
     /// 來源固定「我」— archiver 換來源時自動插 header，會議記錄直接我/對方分段。
     private func handle(_ r: ASRResult) {
-        guard isOn, r.isFinal else { return }
-        guard (r.confidence ?? 1) >= noiseFloor else {
-            Telemetry.meeting.info("final dropped (noise) conf=\(r.confidence ?? -1, format: .fixed(precision: 2), privacy: .public)")
+        guard isOn else { return }
+        guard r.isFinal else {
+            volatileSeen += 1
+            if volatileSeen % 20 == 1 {
+                Telemetry.meeting.info("volatile #\(self.volatileSeen, privacy: .public) \(String(r.text.prefix(20)), privacy: .public)")
+            }
             return
         }
+        Telemetry.meeting.info("final conf=\(r.confidence ?? -1, format: .fixed(precision: 2), privacy: .public) text=\(String(r.text.prefix(30)), privacy: .public)")
+        guard (r.confidence ?? 1) >= noiseFloor else { return }
         controller.appendMicFinal(r.text, locale: r.locale)
+    }
+
+    private var volatileSeen = 0
+
+    /// 第一聲道 RMS — 零值代表 mic 給的是靜音（授權 / 裝置 / 路由問題的指紋）。
+    private static func rms(_ buf: AVAudioPCMBuffer) -> Double {
+        guard let p = buf.floatChannelData, buf.frameLength > 0 else { return -1 }
+        var sum: Float = 0
+        for i in 0..<Int(buf.frameLength) { sum += p[0][i] * p[0][i] }
+        return Double((sum / Float(buf.frameLength)).squareRoot())
     }
 }

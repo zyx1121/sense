@@ -17,7 +17,9 @@ final class BufferConverter {
         let inputFormat = buffer.format
         guard inputFormat != format else { return buffer }
 
-        if converter == nil || converter?.outputFormat != format {
+        // 進出格式任一變了都要重建 — 只認 output 的話，輸入格式改變（如 mic 48k 流中混進
+        // 16k 合成靜音）會拿舊 converter 轉錯資料。
+        if converter == nil || converter?.outputFormat != format || converter?.inputFormat != inputFormat {
             converter = AVAudioConverter(from: inputFormat, to: format)
             converter?.primeMethod = .none  // 犧牲頭幾個 sample 品質，換取不要 timestamp drift
         }

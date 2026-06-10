@@ -1,7 +1,15 @@
 import AVFoundation
 
-enum MicAudioError: Error {
+enum MicAudioError: LocalizedError {
     case permissionDenied
+    case noInputFormat
+
+    var errorDescription: String? {
+        switch self {
+        case .permissionDenied: "麥克風權限未授權（系統設定 → 隱私權與安全性 → 麥克風）"
+        case .noInputFormat: "麥克風輸入未就緒（裝置格式無效）"
+        }
+    }
 }
 
 /// AVAudioEngine 麥克風擷取 — PTT 與會議模式的「我」聲源。
@@ -15,7 +23,17 @@ final class MicAudioSource: AudioSource, @unchecked Sendable {
             throw MicAudioError.permissionDenied
         }
         let input = engine.inputNode
-        let format = input.outputFormat(forBus: 0)  // mic 原生格式，轉換交給 Transcriber 的 BufferConverter
+        // mic 原生格式，轉換交給 Transcriber 的 BufferConverter。
+        // 剛授權完 / 裝置切換的瞬間 inputNode 可能短暫回報 0 Hz — 拿無效格式 installTap
+        // 會丟 ObjC NSException（Swift 接不住，直接閃退；實戰驗屍 2026-06-10）。先驗證 + 短重試。
+        var format = input.outputFormat(forBus: 0)
+        for _ in 0..<20 where format.sampleRate == 0 || format.channelCount == 0 {
+            try? await Task.sleep(for: .milliseconds(100))
+            format = input.outputFormat(forBus: 0)
+        }
+        guard format.sampleRate > 0, format.channelCount > 0 else {
+            throw MicAudioError.noInputFormat
+        }
         let (stream, continuation) = AsyncStream<PCMBuffer>.makeStream()
         self.continuation = continuation
         input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
