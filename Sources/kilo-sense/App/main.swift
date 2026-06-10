@@ -63,6 +63,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusBar?.onMeetingToggle = { [weak self] in
             self?.meetingMode?.toggle() ?? false
         }
+        if CommandLine.arguments.contains("--meeting") {  // 啟動即開會：open … --args --meeting
+            statusBar?.syncMeetingState(meeting.toggle())
+        }
     }
 
     /// 按住右 ⇧ 對 Kilo 說話 — 口述語言取 --langs 第一個（你自己講話的主語言）。

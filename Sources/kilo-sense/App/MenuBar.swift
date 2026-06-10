@@ -111,6 +111,12 @@ final class StatusBarController: NSObject {
         rebuildMenu()
     }
 
+    /// 外部（--meeting 啟動旗標）把開關狀態同步進選單 checkmark。
+    func syncMeetingState(_ on: Bool) {
+        meetingOn = on
+        rebuildMenu()
+    }
+
     @objc private func toggleLaunchAtLogin() {
         do {
             if SMAppService.mainApp.status == .enabled {
