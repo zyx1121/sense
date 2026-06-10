@@ -23,6 +23,7 @@ Leave kilo-sense running while you watch a video, sit in a meeting, take a class
 - **Auto CN/EN switching** — two `SpeechTranscriber` paths run at once; it compares each path's per-final confidence (EMA + hysteresis) and follows whichever language you're speaking
 - **Continuous transcript** — a draggable overlay accumulates the full text; a small model cleans the raw stream in the background (punctuation, mis-recognition fixes, paragraph breaks) — the grey tail keeps flowing in and is replaced by polished white text seconds later
 - **Ask Kilo** — the input field talks straight to a codex agent (carrying the recent transcript + session memory); tool-use steps surface live, replies stream typewriter-style; tell it to take a note and it writes into `~/.kilo/`, and paths in its replies open on click
+- **Push-to-talk** — hold **right ⌥** and speak; your words type into the input field live (transcribed on-device), release to edit, Enter to send. The mic is only open while the key is held
 - **Shake to capture** — wiggle the cursor to enter selection mode: the screen dims, the UI element under the cursor lights up, left-click collects it (text as text, anything else as a screenshot), right-click ends. Captures become chips above the input field, handed to codex on the next turn
 
 ## Architecture
@@ -121,7 +122,7 @@ Requirements:
 - **Apple Development cert** — hash in `Makefile.local` as `SIGN_ID` (gitignored); falls back to ad-hoc signing without one
 - **codex CLI** on PATH (the agent engine; loaded via `zsh -lc`, works through an fnm shim)
 - **OpenAI key** in the Keychain (`service=kilo account=openai`) — used by the agent and transcript cleanup; without it, captions and the transcript still work, the agent is disabled
-- Permissions: **Screen Recording** (system audio + capture screenshots) and **Accessibility** (shake's element probing + click interception), prompted on first launch
+- Permissions: **Screen Recording** (system audio + capture screenshots) and **Accessibility** (shake's element probing + click interception), prompted on first launch; **Microphone** (push-to-talk), prompted on first use
 
 Transcript cleanup goes through `gpt-5.4-mini` over the API directly (no OpenAI key → raw text passes through unpolished).
 
@@ -137,6 +138,7 @@ kilo-sense is a sensory agent: it records system audio and screenshots what you 
 | Data | Where it goes |
 |---|---|
 | System audio | **On-device** SpeechAnalyzer transcription — audio never leaves your Mac |
+| Mic audio (push-to-talk) | **On-device** transcription, mic open only while the key is held — only the text you submit reaches codex |
 | Transcript | Sent to **OpenAI** `gpt-5.4-mini` for cleanup |
 | Your instruction + recent transcript + selected screenshots | Sent to **codex / OpenAI** to generate a reply |
 | Notes / transcript archive | **Local** `~/.kilo`, never uploaded |

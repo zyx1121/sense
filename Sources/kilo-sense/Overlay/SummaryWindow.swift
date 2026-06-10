@@ -62,9 +62,8 @@ final class SummaryWindow {
 }
 
 struct TranscriptView: View {
-    let store: TranscriptStore
+    @Bindable var store: TranscriptStore
     let controller: AgentController
-    @State private var input = ""
 
     /// feed step 與輸入框 icon 共用的 gutter 寬 — 所有 icon 的中心落在同一條垂直線。
     private let iconGutter: CGFloat = 16
@@ -142,14 +141,21 @@ struct TranscriptView: View {
                 .background(.white.opacity(0.04))
             }
 
-            // 指令輸入 → codex agent；相機 = 截游標所在螢幕變 chip
+            // 指令輸入 → codex agent；按住右 ⌥ 語音口述；相機 = 截游標所在螢幕變 chip
             HStack(spacing: 8) {
-                KiloMark(size: 12)
-                    .foregroundStyle(.white.opacity(0.45))
-                    .frame(width: iconGutter)  // 跟 feed step 的 icon 對齊同一條垂直線
-                TextField("問 Kilo，或叫它記錄…", text: $input)
+                if store.pttRecording {
+                    Image(systemName: "mic.fill")
+                        .font(.system(size: 12)).foregroundStyle(.red.opacity(0.9))
+                        .frame(width: iconGutter)
+                } else {
+                    KiloMark(size: 12)
+                        .foregroundStyle(.white.opacity(0.45))
+                        .frame(width: iconGutter)  // 跟 feed step 的 icon 對齊同一條垂直線
+                }
+                TextField(store.pttRecording ? "聽你說…" : "問 Kilo，或叫它記錄…（按住右 ⌥ 說話）",
+                          text: $store.inputDraft)
                     .textFieldStyle(.plain).font(.system(size: 12)).foregroundStyle(.white)
-                    .onSubmit { controller.submit(input); input = "" }
+                    .onSubmit { controller.submit(store.inputDraft); store.inputDraft = "" }
                 if store.thinking { ProgressView().controlSize(.small) }
                 Button {
                     controller.captureScreen()
@@ -176,7 +182,7 @@ struct TranscriptView: View {
         .onHover { hovering in
             if hovering, store.overlayShown { store.touchOverlay() }
         }
-        .onChange(of: input) { _, _ in store.touchOverlay() }
+        .onChange(of: store.inputDraft) { _, _ in store.touchOverlay() }
     }
 
     /// reply 裡的連結：http(s) 交給系統；相對路徑 / file 解析到 ~/.kilo 下用預設 app 開。

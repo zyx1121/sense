@@ -71,7 +71,8 @@ private func linkifyPaths(_ a: inout AttributedString) {
 }
 
 /// 接合兩段文字：ASCII 字詞間、英文句點後接字詞要補空格（"2017." + "It" → "2017. It"），CJK 直接相連。
-private func glue(_ a: String, _ b: String) -> String {
+/// internal — PushToTalk 拼輸入框草稿用同一套規則。
+func glue(_ a: String, _ b: String) -> String {
     guard let last = a.last, let first = b.first else { return a + b }
     let wordy: (Character) -> Bool = { $0.isASCII && ($0.isLetter || $0.isNumber) }
     if (wordy(last) || ".!?,".contains(last)) && wordy(first) { return a + " " + b }
@@ -106,6 +107,10 @@ final class TranscriptStore {
 
     /// shake 圈選收進來、等下一輪 codex 帶上的素材。
     private(set) var attachments: [Asset] = []
+
+    // — PTT（按住右 ⌥ 說話）：草稿放 store 才能讓語音注入；view 雙向綁定同一份 —
+    var inputDraft = ""
+    var pttRecording = false
 
     // — overlay 可見性：shake / 打字 / agent 活動 / hover 續命，閒置自動收合 —
     // 聲音（逐字稿流入）刻意不續命：那是 notch 的展開條件，overlay 只跟「使用者在動它」走。

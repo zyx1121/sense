@@ -23,6 +23,7 @@
 - **中英自動切換** — 兩路 SpeechTranscriber 同時轉錄，比較各路定稿信心（EMA + 遲滯），講到哪個語言就自動走哪路
 - **連續逐字稿** — 可拖動的 overlay 視窗累積全文；小模型背景把生稿補標點、修辨識錯字、分段 — 灰字尾巴一直流入，幾秒後被整理過的白字取代
 - **問 Kilo** — 輸入框直通 codex agent（帶最近逐字稿 + session 記憶），tool use 步驟即時浮出、回應打字機串流；說「記錄下來」它就寫筆記進 `~/.kilo/`，回覆裡的路徑點了直接開
+- **按住說話** — 按住**右 ⌥** 對 Kilo 口述，文字即時打進輸入框（本機轉錄），放開可修改、Enter 送出；只有按住時 mic 才開著
 - **Shake 圈選** — 晃游標進選取模式：螢幕變暗、游標下的 UI 元素亮起，左鍵點擊收集（文字收文字、其他截圖），右鍵結束；素材變輸入框上方的 chips，下一輪丟給 codex 看圖分析
 
 ## 架構
@@ -121,7 +122,7 @@ make publish   # make release + 傳上 GitHub Release（簽名私鑰不出本機
 - **Apple Development cert** — hash 放 `Makefile.local` 的 `SIGN_ID`（gitignored），沒有就 ad-hoc 簽
 - **codex CLI** 在 PATH（agent 引擎；`zsh -lc` 載入，fnm shim 也通）
 - **OpenAI key** 在 Keychain（`service=kilo account=openai`）— agent 與逐字稿整理的 fallback 用；沒有 key 字幕與逐字稿照常，agent 停用
-- 權限：**螢幕錄製**（系統音訊 + 圈選截圖）、**輔助使用**（shake 的元素探測與點擊攔截），首次啟動會提示
+- 權限：**螢幕錄製**（系統音訊 + 圈選截圖）、**輔助使用**（shake 的元素探測與點擊攔截），首次啟動會提示；**麥克風**（按住說話），首次使用時提示
 
 逐字稿整理走 `gpt-5.4-mini` 直打 API（沒 OpenAI key → 原文直出，不整理）。
 
@@ -137,6 +138,7 @@ kilo-sense 是感官 agent，會錄系統音訊、截你圈選的畫面。資料
 | 資料 | 去哪 |
 |---|---|
 | 系統音訊 | **本機** SpeechAnalyzer 即時轉錄，音訊不離開你的 Mac |
+| 麥克風（按住說話） | **本機**轉錄，只有按住鍵時 mic 開著 — 只有你按 Enter 送出的文字進 codex |
 | 逐字稿 | 送 **OpenAI** `gpt-5.4-mini` 整理潤稿 |
 | 你的指令 + 最近逐字稿 + 圈選截圖 | 送 **codex / OpenAI** 產生回應 |
 | 筆記 / 逐字稿存檔 | **本機** `~/.kilo`，不上傳 |

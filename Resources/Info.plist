@@ -28,5 +28,7 @@
 	<true/>
 	<key>NSScreenCaptureUsageDescription</key>
 	<string>Kilo 需要螢幕錄製權限來擷取系統音訊（你正在聽的影片 / 通話）做即時轉錄。</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Kilo 需要麥克風權限：按住右 Option 對 Kilo 說話（語音輸入），以及會議模式錄下你這側的發言。</string>
 </dict>
 </plist>

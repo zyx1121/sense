@@ -40,6 +40,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var agentController: AgentController?
     private var shakeCapture: ShakeCapture?
     private var statusBar: StatusBarController?
+    private var pushToTalk: PushToTalk?
 
     func applicationDidFinishLaunching(_: Notification) {
         Task.detached { _ = CodexAgent.shellPath }  // 背景預熱 codex PATH 解析（GUI app 貧瘠環境用）
@@ -48,6 +49,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         showSummaryWindow()
         startShakeCapture()
         startPipeline()
+        startPushToTalk()
+    }
+
+    /// 按住右 ⌥ 對 Kilo 說話 — 口述語言取 --langs 第一個（你自己講話的主語言）。
+    private func startPushToTalk() {
+        let ptt = PushToTalk(store: transcript, locale: Locale(identifier: parsedLangs()[0]))
+        ptt.start()
+        pushToTalk = ptt
+    }
+
+    /// 辨識語言：--langs zh-TW,en-US（雙路擇優，預設）；--lang en-US（單語，向後相容）。
+    private func parsedLangs() -> [String] {
+        let args = CommandLine.arguments
+        func value(after flag: String) -> String? {
+            args.firstIndex(of: flag).flatMap { args.indices.contains($0 + 1) ? args[$0 + 1] : nil }
+        }
+        return (value(after: "--langs") ?? value(after: "--lang") ?? "zh-TW,en-US")
+            .split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
     }
 
     /// 晃游標 → 圈選畫面元素給 Kilo 看（dim + spotlight + click capture）。
@@ -99,13 +118,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         guard let controller = agentController else { return }
 
-        // 辨識語言：--langs zh-TW,en-US（雙路擇優，預設）；--lang en-US（單語，向後相容）
-        let args = CommandLine.arguments
-        func value(after flag: String) -> String? {
-            args.firstIndex(of: flag).flatMap { args.indices.contains($0 + 1) ? args[$0 + 1] : nil }
-        }
-        let langs = (value(after: "--langs") ?? value(after: "--lang") ?? "zh-TW,en-US")
-            .split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
+        let langs = parsedLangs()
         logErr("辨識語言：\(langs.joined(separator: " + "))\(langs.count > 1 ? "（信心擇優）" : "")")
 
         let router = LanguageRouter(initial: langs[0], captions: captions, controller: controller)
