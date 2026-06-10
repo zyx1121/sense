@@ -35,6 +35,10 @@ struct KiloMark: View {
 final class StatusBarController: NSObject {
     private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
+    /// 會議模式開關（main.swift 接 MeetingMode.toggle）；回傳切換後狀態給 checkmark。
+    var onMeetingToggle: (() -> Bool)?
+    private var meetingOn = false
+
     override init() {
         super.init()
         let mark = Brand.mark.copy() as! NSImage
@@ -51,12 +55,16 @@ final class StatusBarController: NSObject {
         menu.addItem(title)
         menu.addItem(.separator())
 
+        let meeting = add(menu, "會議模式（錄下我的發言）", #selector(toggleMeeting))
+        meeting.state = meetingOn ? .on : .off
+
         add(menu, "開啟逐字稿資料夾", #selector(openTranscripts))
 
         let perm = NSMenuItem(title: "權限設定", action: nil, keyEquivalent: "")
         let sub = NSMenu()
         add(sub, "輔助使用…", #selector(openAccessibility))
         add(sub, "螢幕錄製…", #selector(openScreenRecording))
+        add(sub, "麥克風…", #selector(openMicrophone))
         perm.submenu = sub
         menu.addItem(perm)
 
@@ -91,6 +99,16 @@ final class StatusBarController: NSObject {
     @objc private func openScreenRecording() {
         NSWorkspace.shared.open(URL(string:
             "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
+    }
+
+    @objc private func openMicrophone() {
+        NSWorkspace.shared.open(URL(string:
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")!)
+    }
+
+    @objc private func toggleMeeting() {
+        meetingOn = onMeetingToggle?() ?? false
+        rebuildMenu()
     }
 
     @objc private func toggleLaunchAtLogin() {

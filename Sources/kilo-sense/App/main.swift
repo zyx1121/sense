@@ -41,6 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var shakeCapture: ShakeCapture?
     private var statusBar: StatusBarController?
     private var pushToTalk: PushToTalk?
+    private var meetingMode: MeetingMode?
 
     func applicationDidFinishLaunching(_: Notification) {
         Task.detached { _ = CodexAgent.shellPath }  // 背景預熱 codex PATH 解析（GUI app 貧瘠環境用）
@@ -50,6 +51,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         startShakeCapture()
         startPipeline()
         startPushToTalk()
+        setUpMeetingMode()
+    }
+
+    /// 會議模式：選單列開關 → mic 持續錄（我這側），與系統音訊雙流分轉。
+    private func setUpMeetingMode() {
+        guard let controller = agentController else { return }
+        let meeting = MeetingMode(store: transcript, controller: controller,
+                                  locale: Locale(identifier: parsedLangs()[0]))
+        meetingMode = meeting
+        statusBar?.onMeetingToggle = { [weak self] in
+            self?.meetingMode?.toggle() ?? false
+        }
     }
 
     /// 按住右 ⇧ 對 Kilo 說話 — 口述語言取 --langs 第一個（你自己講話的主語言）。

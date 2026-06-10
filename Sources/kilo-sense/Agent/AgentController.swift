@@ -54,6 +54,13 @@ final class AgentController {
         polisher.nudge()
     }
 
+    /// 會議模式：mic（你這側）的定稿 — 來源固定標「我」，不跟前景 app。
+    func appendMicFinal(_ text: String, locale: String) {
+        store.commitFinal(text, locale: locale, source: "我")
+        metrics.recordSegment(chars: text.count)
+        polisher.nudge()
+    }
+
     /// 使用者在 overlay 打的指令 → codex（連同最近逐字稿 + 全部圈選素材，送出即消耗）。
     func submit(_ instruction: String) {
         let instruction = instruction.trimmingCharacters(in: .whitespacesAndNewlines)

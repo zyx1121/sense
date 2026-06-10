@@ -8,4 +8,5 @@ enum Telemetry {
     static let polish = Logger(subsystem: "tw.zyx.kilo", category: "polish")
     static let shake = Logger(subsystem: "tw.zyx.kilo", category: "shake")
     static let ptt = Logger(subsystem: "tw.zyx.kilo", category: "ptt")
+    static let meeting = Logger(subsystem: "tw.zyx.kilo", category: "meeting")
 }

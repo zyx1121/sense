@@ -140,14 +140,15 @@ final class TranscriptStore {
         while pendingRaw.count > 12000, !pending.isEmpty { pending.removeFirst() }  // 無 polisher 時的安全閥
     }
 
-    /// pending 開頭「同語言的連續段」— polisher 的一個整理批次。
-    /// boundary = 後面還接著別的語言（語言切換點，提示 polisher 別等湊字數、快點沖掉）。
+    /// pending 開頭「同語言、同來源的連續段」— polisher 的一個整理批次。
+    /// 來源也斷批：會議模式我（mic）/ 對方（系統音）交錯時，批次混源會讓歸檔的
+    /// 出處標頭張冠李戴。boundary = 後面接著別的語言或來源（提示 polisher 別等湊字數、快點沖掉）。
     func firstPendingRun() -> (locale: String, text: String, segments: Int, boundary: Bool, source: String?)? {
         guard let first = pending.first else { return nil }
         var text = first.text
         var n = 1
         for seg in pending.dropFirst() {
-            guard seg.locale == first.locale else {
+            guard seg.locale == first.locale, seg.source == first.source else {
                 return (first.locale, text, n, true, first.source)
             }
             text = glue(text, seg.text)
