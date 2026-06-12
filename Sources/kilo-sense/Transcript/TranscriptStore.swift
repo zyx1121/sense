@@ -448,6 +448,13 @@ final class TranscriptStore {
 
     func setThinking(_ b: Bool) { thinking = b }
 
+    /// 清空輪替史 — 聲紋 enroll 後字母重排（resetAnonymous），舊輪替裡的「講者 A」
+    /// 字串指向重排前的另一個人，留著會餵壞 enricher 的一致性閘。
+    func clearRecentTurns() {
+        recentTurns = []
+        turnsVersion += 1
+    }
+
     /// 清空 Kilo 對話 feed（/clear、右鍵「清除對話」）— 步驟與打字機歸零；逐字稿與圈選素材不動。
     /// 還在飛的 turn 事件會落進清空後的 feed — 接受（那是新對話前最後的殘響）。
     func clearFeed() {

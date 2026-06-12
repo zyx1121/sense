@@ -31,6 +31,23 @@ actor SpeakerDiarizerPump {
     private var enrolledNames: Set<String> = []
     private var lastPublish = Date.distantPast  // 純暫定段的發布節流
 
+    // — 聲紋驗證閘：LS-EEND 沒有 open-set rejection，庫裡有人時陌生聲音會被硬配到
+    // 最像的具名 slot（實測中文 podcast 被掛成英文節目 enroll 的 David/Sarah）。
+    // 具名 slot 的 live 音訊累積 ≥3s 後抽 WeSpeaker embedding，跟 voices/ 原始樣本的
+    // reference embedding 比 cosine distance：過門檻才放行名字，否則該 slot 本 session
+    // 降級匿名（講者 X）。驗證器載不到 → fallback 直接信 LS-EEND（不啞掉）。
+    // 已知限制：verdict 是 per-session per-slot 一次性 — 同 slot 先後host不同人不會重驗。
+    private var verifier: DiarizerManager?
+    private var verifierFailed = false
+    private var referenceEmbeddings: [String: [Float]] = [:]
+    private var slotVerdicts: [Int: Bool] = [:]   // slot → 驗證通過 / 拒絕
+    private var slotPendingRanges: [Int: [(start: Double, end: Double)]] = [:]
+    // 0.5 = 介於 FluidAudio「高信心同人」embeddingThreshold(0.45) 與同流 assignment(0.65)
+    // 之間 — 開放集合跨情境驗證要比同流 assignment 嚴：實測 Meijia TTS 對 Samantha 聲紋
+    // dist≈0.65，0.65 門檻會誤放行；真同人同條件通常 ≲0.4。
+    private let verifyDistance: Float = 0.5
+    private let verifyMinSeconds = 3.0
+
     init(timeline: SpeakerTimeline) {
         self.timeline = timeline
         (queue, intake) = AsyncStream.makeStream(of: Feed.self)
@@ -62,6 +79,9 @@ actor SpeakerDiarizerPump {
             switch item {
             case .gap:
                 idle = true
+                // 恢復餵食時 offset 會重算 — 累積中的待驗證範圍跨時鐘不可信，
+                // 重收（verdict 是 sticky 的，寧可慢不可髒）
+                slotPendingRanges = [:]
             case .audio(let buffer, let streamSeconds):
                 await consume(buffer, streamSeconds: streamSeconds)
             case .enroll(let name, let ranges):
@@ -82,8 +102,30 @@ actor SpeakerDiarizerPump {
             diarizer = d
             Telemetry.meeting.info("diarizer ready")
             reenrollSavedVoices(d)  // 聲紋註冊回去 — 跨 session 認人
+            Task { await self.ensureVerifier() }  // 驗證器另載（下載 await 期間 actor 照常吃音訊）
         } catch {
             Telemetry.meeting.error("diarizer init failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// 載 pyannote segmentation + WeSpeaker embedding（驗證用，跟 LS-EEND 分開），
+    /// 並把 voices/ 的原始樣本各抽一條 reference embedding。失敗 → fallback 直接信 LS-EEND。
+    private func ensureVerifier() async {
+        guard verifier == nil, !verifierFailed else { return }
+        let saved = VoiceStore.loadAll()
+        guard !saved.isEmpty else { return }  // 沒聲紋庫就沒有 false-accept 問題
+        do {
+            let models = try await DiarizerModels.downloadIfNeeded()
+            let m = DiarizerManager()
+            m.initialize(models: models)
+            for (name, samples) in saved {
+                referenceEmbeddings[name] = try m.extractSpeakerEmbedding(from: samples)
+            }
+            verifier = m
+            Telemetry.enrich.info("voiceprint verifier ready（\(self.referenceEmbeddings.count, privacy: .public) refs）")
+        } catch {
+            verifierFailed = true
+            Telemetry.enrich.error("voiceprint verifier unavailable — 直接信 LS-EEND：\(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -115,10 +157,10 @@ actor SpeakerDiarizerPump {
 
     /// 從 ring 撈該講者的片段音訊註冊聲紋。enroll 會 reset diarizer 內部 timeline
     ///（時鐘歸零）— 成功後重置 fedSeconds 並重算 offset，匿名字母/名字映射也清掉重排。
-    private func enroll(name: String, ranges: [(start: Double, end: Double)]) {
-        guard let diarizer, !enrolledNames.contains(name) else { return }
+    /// 從 ring 撈指定時間範圍（stream 時鐘）的音訊 — 新範圍優先、總長封頂 capSeconds。
+    private func collectAudio(ranges: [(start: Double, end: Double)], capSeconds: Double = 15) -> [Float] {
         var collected: [Float] = []
-        for r in ranges.reversed() {  // 新的片段優先
+        for r in ranges.reversed() {
             for chunk in ring {
                 let chunkEnd = chunk.start + Double(chunk.samples.count) / 16_000
                 let s = max(r.start, chunk.start), e = min(r.end, chunkEnd)
@@ -126,18 +168,27 @@ actor SpeakerDiarizerPump {
                 let from = Int((s - chunk.start) * 16_000), to = Int((e - chunk.start) * 16_000)
                 collected.append(contentsOf: chunk.samples[max(0, from)..<min(chunk.samples.count, to)])
             }
-            if collected.count >= 15 * 16_000 { break }
+            if collected.count >= Int(capSeconds * 16_000) { break }
         }
+        return collected
+    }
+
+    private func enroll(name: String, ranges: [(start: Double, end: Double)]) {
+        guard let diarizer, !enrolledNames.contains(name) else { return }
+        let collected = collectAudio(ranges: ranges)
         guard collected.count >= 3 * 16_000 else {
             Telemetry.enrich.info("enroll skipped \(name, privacy: .public) — 聲音樣本不足 \(collected.count / 16_000, privacy: .public)s")
             return
         }
         do {
-            guard try diarizer.enrollSpeaker(withAudio: collected, sourceSampleRate: 16_000,
-                                             named: name) != nil else {
+            guard let speaker = try diarizer.enrollSpeaker(withAudio: collected, sourceSampleRate: 16_000,
+                                                           named: name) else {
                 Telemetry.enrich.info("enroll rejected \(name, privacy: .public)")
                 return
             }
+            // 這個 slot 的身分是「從這段現場音訊」確認的 — 本 session 免再驗
+            slotVerdicts[speaker.index] = true
+            if let verifier { referenceEmbeddings[name] = try? verifier.extractSpeakerEmbedding(from: collected) }
             enrolledNames.insert(name)
             fedSeconds = 0; idle = true   // enroll reset 了 diarizer 時鐘 — 下顆 buffer 重算 offset
             VoiceStore.save(name: name, samples: collected)
@@ -164,11 +215,15 @@ actor SpeakerDiarizerPump {
     }
 
     private func ingest(_ update: DiarizerTimelineUpdate) {
-        // 已 enroll 的講者 slot 直接帶名字（「David」），匿名 slot 維持數字 → timeline 配字母
+        // 已 enroll 的講者 slot 帶名字（「David」），但要過聲紋驗證才放行 —
+        // 未驗證 / 被拒的 slot 維持數字 → timeline 配字母（講者 X）。
         let names = diarizer?.timeline.speakers.compactMapValues(\.name) ?? [:]
+        trackVerification(update, names: names)
         func convert(_ s: DiarizerSegment) -> SpeakerTimeline.Segment {
-            SpeakerTimeline.Segment(
-                speaker: names[s.speakerIndex] ?? String(s.speakerIndex),
+            let idx = s.speakerIndex
+            let trusted = verifierFailed || slotVerdicts[idx] == true
+            return SpeakerTimeline.Segment(
+                speaker: trusted ? (names[idx] ?? String(idx)) : String(idx),
                 start: offset + Double(s.startTime),
                 end: offset + Double(s.endTime))
         }
@@ -189,6 +244,38 @@ actor SpeakerDiarizerPump {
         let snapshot = segments + tentative
         let timeline = timeline
         Task { @MainActor in timeline.update(snapshot) }
+    }
+
+    /// 具名 slot 的驗證簿記：累積該 slot 的定稿段範圍，滿 3s 抽 embedding 對 reference 驗。
+    private func trackVerification(_ update: DiarizerTimelineUpdate, names: [Int: String]) {
+        guard !verifierFailed else { return }
+        for s in update.finalizedSegments {
+            let idx = s.speakerIndex
+            guard names[idx] != nil, slotVerdicts[idx] == nil else { continue }
+            slotPendingRanges[idx, default: []].append(
+                (offset + Double(s.startTime), offset + Double(s.endTime)))
+            if slotPendingRanges[idx]!.count > 20 { slotPendingRanges[idx]!.removeFirst() }
+        }
+        for (slot, ranges) in slotPendingRanges {
+            guard slotVerdicts[slot] == nil, let name = names[slot] else { continue }
+            let total = ranges.reduce(0) { $0 + ($1.end - $1.start) }
+            guard total >= verifyMinSeconds else { continue }
+            // verifier 還在載 / ring 已滾掉樣本 → 留著下次 update 再驗
+            guard let verifier, let ref = referenceEmbeddings[name] else { continue }
+            let audio = collectAudio(ranges: ranges)
+            guard audio.count >= Int(verifyMinSeconds * 16_000) else { continue }
+            do {
+                let emb = try verifier.extractSpeakerEmbedding(from: audio)
+                let dist = SpeakerUtilities.cosineDistance(emb, ref)
+                let ok = dist < verifyDistance
+                slotVerdicts[slot] = ok
+                slotPendingRanges[slot] = nil
+                Telemetry.enrich.info("voiceprint \(ok ? "verified" : "rejected", privacy: .public) slot \(slot, privacy: .public) → \(name, privacy: .public)（dist=\(dist, format: .fixed(precision: 2), privacy: .public)）")
+            } catch {
+                Telemetry.enrich.error("voiceprint verify failed slot \(slot, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                slotPendingRanges[slot] = nil  // 這批樣本壞了重收，不無限重試同批
+            }
+        }
     }
 
     private static func samples(_ pcm: AVAudioPCMBuffer) -> [Float]? {
@@ -270,11 +357,16 @@ final class SpeakerTimeline {
         return displayNames[l] ?? "\(prefix) \(l)"
     }
 
+    /// 匿名映射世代 — resetAnonymous 遞增。enricher 靠這個發現字母已重排：
+    /// 跨世代的「講者 A」是不同人，舊提案與舊輪替史不能再餵一致性閘。
+    private(set) var anonymousGeneration = 0
+
     /// enroll 後 diarizer slot 重排 — 匿名映射（字母 / LLM 名）全部作廢重排，
     /// 下一輪 enrich 會基於新 slot 重建。
     func resetAnonymous() {
         letters = [:]
         displayNames = [:]
+        anonymousGeneration += 1
     }
 
     /// 該字母是否已有顯示名（enricher 穩態降速的判斷）。
