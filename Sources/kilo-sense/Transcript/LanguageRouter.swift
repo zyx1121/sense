@@ -64,7 +64,7 @@ final class LanguageRouter {
                 return
             }
             captions.commitFinal(r.text)
-            controller.appendFinal(r.text, locale: r.locale, timeRange: r.timeRange)
+            controller.appendFinal(r.text, locale: r.locale, timeRange: r.timeRange, pieces: r.pieces)
         } else {
             captions.setVolatile(r.text)
             controller.appendVolatile(r.text)

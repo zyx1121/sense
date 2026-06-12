@@ -14,6 +14,9 @@ struct ASRResult {
     let isFinal: Bool
     let confidence: Double?   // .transcriptionConfidence run 平均；沒有就 nil
     let timeRange: CMTimeRange?  // 相對 analyzer 輸入流起點 — 分人對時用
+    /// word 級時間切片（final 才有）— 一筆 final 可能橫跨講者換人點，
+    /// 取批時靠這個在邊界把段切開，前後各自掛講者標籤。
+    var pieces: [(text: String, range: CMTimeRange)] = []
 }
 
 /// SpeechAnalyzer + SpeechTranscriber 包裝：單一 locale 一路，結果統一走 onResult。
@@ -66,7 +69,8 @@ final class Transcriber {
                         text: text,
                         isFinal: result.isFinal,
                         confidence: Self.meanConfidence(result.text),
-                        timeRange: Self.timeRange(result.text)))
+                        timeRange: Self.timeRange(result.text),
+                        pieces: result.isFinal ? Self.timedPieces(result.text) : []))
                 }
             } catch {
                 FileHandle.standardError.write(Data("results error [\(localeID)]: \(error)\n".utf8))
@@ -81,6 +85,25 @@ final class Transcriber {
         let ranges = text.runs.compactMap(\.audioTimeRange)
         guard let first = ranges.first, let last = ranges.last else { return nil }
         return CMTimeRange(start: first.start, end: last.end)
+    }
+
+    /// word 級時間切片：每個帶 audioTimeRange 的 run 一片；沒時間的 run（標點等）
+    /// 併進前一片（開頭的併進第一個有時間的片）。整串都沒時間 → 空（無從切）。
+    private static func timedPieces(_ text: AttributedString) -> [(text: String, range: CMTimeRange)] {
+        var out: [(text: String, range: CMTimeRange)] = []
+        var lead = ""
+        for run in text.runs {
+            let s = String(text[run.range].characters)
+            if let tr = run.audioTimeRange {
+                out.append((lead + s, tr))
+                lead = ""
+            } else if out.isEmpty {
+                lead += s
+            } else {
+                out[out.count - 1].text += s
+            }
+        }
+        return out
     }
 
     /// run 平均信心（以字元數加權；volatile 可能整串沒有 → nil）。
