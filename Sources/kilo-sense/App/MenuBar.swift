@@ -3,10 +3,12 @@ import ServiceManagement
 import SwiftUI
 
 /// app 的品牌 mark（zyx logo），跟 app icon 同一個形狀 — 取代 SF Symbol sparkle。
+/// vector PDF（rsvg-convert 從 zyx.svg 出，剝掉 drop-shadow、緊 bbox）：
+/// rep 在繪製尺寸 rasterize，12pt 小圖不再鋸齒 — 512px PNG 走 bitmap 縮放路徑會糊。
 /// template NSImage：狀態欄自動明暗、SwiftUI 端用 foregroundStyle 染色。
 enum Brand {
     static let mark: NSImage = {
-        if let p = Bundle.main.path(forResource: "KiloMark", ofType: "png"),
+        if let p = Bundle.main.path(forResource: "KiloMark", ofType: "pdf"),
            let img = NSImage(contentsOfFile: p) {
             img.isTemplate = true
             return img
@@ -23,6 +25,7 @@ struct KiloMark: View {
     var body: some View {
         Image(nsImage: Brand.mark)
             .resizable()
+            .interpolation(.high)
             .renderingMode(.template)
             .aspectRatio(contentMode: .fit)
             .frame(width: size, height: size)
