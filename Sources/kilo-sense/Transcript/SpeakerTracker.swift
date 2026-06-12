@@ -17,10 +17,20 @@ actor SpeakerDiarizerPump {
         case warmup  // 開機預熱：先 init + re-enroll,首句語音就認得人（不等 speech gate）
     }
 
+    /// 預設 NVIDIA Streaming Sortformer（spkcache + chunk streaming，為快速換手的
+    /// 即時對話設計）；`--diarizer ls-eend` 退回 LS-EEND（支援 >4 講者，但實測
+    /// 兩人快速一來一往時整段判同一人 — 同段音訊 A/B：LS-EEND 出 1 個講者塊、
+    /// Sortformer 出 A/B/A 正確交替）。兩者同 `Diarizer` protocol，僅 init 不同。
+    private static let useSortformer: Bool = {
+        let args = CommandLine.arguments
+        guard let i = args.firstIndex(of: "--diarizer"), args.indices.contains(i + 1) else { return true }
+        return args[i + 1].lowercased() != "ls-eend"
+    }()
+
     private let timeline: SpeakerTimeline
     private let queue: AsyncStream<Feed>
     private let intake: AsyncStream<Feed>.Continuation
-    private var diarizer: LSEENDDiarizer?
+    private var diarizer: (any Diarizer)?
     private var fedSeconds: Double = 0
     private var offset: Double = 0
     private var idle = true
@@ -96,9 +106,17 @@ actor SpeakerDiarizerPump {
     private func ensureDiarizer() async {
         guard diarizer == nil else { return }
         do {
-            Telemetry.meeting.info("diarizer init…（首次需下載 model）")
-            let d = LSEENDDiarizer()
-            try await d.initialize(variant: .dihard3)
+            Telemetry.meeting.info("diarizer init…（首次需下載 model，engine=\(Self.useSortformer ? "sortformer" : "ls-eend", privacy: .public)）")
+            let d: any Diarizer
+            if Self.useSortformer {
+                let sf = SortformerDiarizer()
+                sf.initialize(models: try await SortformerModels.loadFromHuggingFace(config: .default))
+                d = sf
+            } else {
+                let ls = LSEENDDiarizer()
+                try await ls.initialize(variant: .dihard3)
+                d = ls
+            }
             diarizer = d
             Telemetry.meeting.info("diarizer ready")
             reenrollSavedVoices(d)  // 聲紋註冊回去 — 跨 session 認人
@@ -182,7 +200,8 @@ actor SpeakerDiarizerPump {
         }
         do {
             guard let speaker = try diarizer.enrollSpeaker(withAudio: collected, sourceSampleRate: 16_000,
-                                                           named: name) else {
+                                                           named: name,
+                                                           overwritingAssignedSpeakerName: true) else {
                 Telemetry.enrich.info("enroll rejected \(name, privacy: .public)")
                 return
             }
@@ -201,10 +220,11 @@ actor SpeakerDiarizerPump {
     }
 
     /// 開機 re-enroll：diarizer 不提供 embedding 匯出,聲紋以原始音訊形式持久化、每次啟動重註冊。
-    private func reenrollSavedVoices(_ d: LSEENDDiarizer) {
+    private func reenrollSavedVoices(_ d: any Diarizer) {
         for (name, samples) in VoiceStore.loadAll() {
             do {
-                if try d.enrollSpeaker(withAudio: samples, sourceSampleRate: 16_000, named: name) != nil {
+                if try d.enrollSpeaker(withAudio: samples, sourceSampleRate: 16_000, named: name,
+                                       overwritingAssignedSpeakerName: true) != nil {
                     enrolledNames.insert(name)
                     Telemetry.enrich.info("re-enrolled \(name, privacy: .public)")
                 }
