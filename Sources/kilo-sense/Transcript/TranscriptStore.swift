@@ -233,21 +233,44 @@ final class TranscriptStore {
     }
 
     /// 一筆 ASR final 可能橫跨講者換人點（沒長停頓時 final 很長）— 整段 dominantLabel
-    /// 擇多會把前一講者的尾巴掛給講比較多的下一位。取批前用 word 級時間片把跨講者的
-    /// 段物理切開，前後各自成段、各自掛標。<1s 的講者群視為 diarizer 邊界抖動併回前群。
+    /// 擇多會把前一講者的尾巴掛給講比較多的下一位。取批前把跨講者的段物理切開，
+    /// 前後各自成段、各自掛標。<1s 的講者群視為 diarizer 邊界抖動併回前群。
+    ///
+    /// 切點只允許落在句界：diarizer 邊界有 ±秒級誤差，word 級直切會把句子撕一半
+    ///（實測 podcast 切在「我先講一個小｜故事…」）。先把 word 片組回句子（句末標點
+    /// 或 >0.8s 靜默為界），每句整句歸給該句時間範圍的主講者 — 句子通常 ≥2s，
+    /// 秒級誤差傷不到（WhisperX 等 ASR×diarization pipeline 的標準做法）。
     private func splitAtSpeakerChange(_ i: Int) {
         guard let resolver = speakerResolver, i < pending.count else { return }
         let seg = pending[i]
         guard seg.pieces.count >= 2 else { return }
 
-        // 逐片解析講者 → 連續同講者分組；查無講者（nil）跟著前群走，不自成邊界
+        // 1. word 片 → 句子（句末標點收尾、或與下一片之間 >0.8s 靜默）
+        var sentences: [[(text: String, range: CMTimeRange)]] = []
+        var cur: [(text: String, range: CMTimeRange)] = []
+        for (j, p) in seg.pieces.enumerated() {
+            cur.append(p)
+            let t = p.text.trimmingCharacters(in: .whitespaces)
+            let sentenceEnd = t.last.map { "。！？.!?…".contains($0) } ?? false
+            let gap = j + 1 < seg.pieces.count
+                ? seg.pieces[j + 1].range.start.seconds - p.range.end.seconds
+                : 0
+            if sentenceEnd || gap > 0.8 {
+                sentences.append(cur); cur = []
+            }
+        }
+        if !cur.isEmpty { sentences.append(cur) }
+        guard sentences.count >= 2 else { return }
+
+        // 2. 句級多數決 → 連續同講者分組；查無講者（nil）跟著前群走，不自成邊界
         var groups: [(label: String?, pieces: [(text: String, range: CMTimeRange)])] = []
-        for p in seg.pieces {
-            let label = resolver(p.range)
+        for s in sentences {
+            let range = CMTimeRange(start: s.first!.range.start, end: s.last!.range.end)
+            let label = resolver(range)
             if groups.isEmpty || (label != nil && label != groups[groups.count - 1].label) {
-                groups.append((label, [p]))
+                groups.append((label, s))
             } else {
-                groups[groups.count - 1].pieces.append(p)
+                groups[groups.count - 1].pieces += s
             }
         }
         // 開頭查無講者的片段（diarizer 還沒蓋到）併進下一群
