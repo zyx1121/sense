@@ -1,6 +1,7 @@
 import AppKit
 import CoreMedia
 import Foundation
+import UniformTypeIdentifiers
 
 /// 圈選素材的快捷動作（chip 右鍵選單）。
 enum QuickAction {
@@ -111,8 +112,49 @@ final class AgentController {
     /// chip 快捷動作：只消耗那一顆 chip。
     func quickAction(_ action: QuickAction, on asset: Asset) {
         store.removeAttachment(asset)
+        let what = switch asset.kind {
+        case .image: "截圖"
+        case .text: "圈選文字"
+        case .file: "檔案"
+        }
         run(instruction: action.instruction, attachments: [asset],
-            label: "\(action.label)（\(asset.typeLabel == "image" ? "截圖" : "圈選文字")）")
+            label: "\(action.label)（\(what)）")
+    }
+
+    /// Finder 拖進 overlay 的檔案 → chips。圖片檔 stage 進 captures 直接走 -i（零解碼 —
+    /// 48MP 照片在主執行緒 decode+re-encode 會凍 4 秒），其他檔案留路徑讓 codex 自己讀。
+    /// 瀏覽器拖進來的連結（dropDestination 連 public.url 都收）變文字 chip，codex 自己抓。
+    func addDroppedFiles(_ urls: [URL]) {
+        for url in urls {
+            guard url.isFileURL else {
+                let s = url.absoluteString
+                guard !s.isEmpty else { continue }
+                store.addAttachment(Asset(kind: .text(s), source: url.host() ?? "連結",
+                                          capturedAt: Date()))
+                continue
+            }
+            let name = url.lastPathComponent
+            let isImage = UTType(filenameExtension: url.pathExtension)?.conforms(to: .image) == true
+            // stage 失敗就降級成一般檔案（路徑走 env 進 prompt，不碰 -i 的引號拼接）
+            let path = isImage ? (stageImage(url) ?? url.path) : url.path
+            store.addAttachment(Asset(kind: .file(path), source: name, capturedAt: Date()))
+        }
+    }
+
+    /// 拖入的圖片檔 clone 進 ~/.kilo/captures（APFS COW，免解碼免等）— 原檔之後被移走
+    /// 也不影響；檔名自家產（UUID + 淨化過的副檔名），拼進 codex -i 的單引號才安全。
+    private func stageImage(_ url: URL) -> String? {
+        let dir = kiloWorkdir + "/captures"
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        let ext = url.pathExtension.filter { $0.isLetter || $0.isNumber }
+        let dest = dir + "/drop-\(UUID().uuidString)" + (ext.isEmpty ? "" : ".\(ext)")
+        do {
+            try FileManager.default.copyItem(atPath: url.path, toPath: dest)
+            return dest
+        } catch {
+            Telemetry.shake.error("stage dropped image failed: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
     }
 
     /// 截「游標所在的螢幕」整幅 → 變成一顆 chip（不自動送出，可疊指令、跟其他 chip 組合）。
@@ -150,10 +192,25 @@ final class AgentController {
         if !texts.isEmpty {
             fullInstruction += "\n\n（使用者圈選的畫面文字）\n" + texts.joined(separator: "\n---\n")
         }
-        let imagePaths = saveImages(attachments)
+        // .file 分流：只有自家 stage 出來的 captures 路徑能進 -i（引號拼接安全），
+        // 其他一律列路徑讓 codex 自己讀（走 env，不碰命令字串）
+        var stagedImages: [String] = []
+        var files: [String] = []
+        for a in attachments {
+            guard case .file(let p) = a.kind else { continue }
+            if p.hasPrefix(kiloWorkdir + "/captures/") { stagedImages.append(p) } else { files.append(p) }
+        }
+        if !files.isEmpty {
+            fullInstruction += "\n\n（使用者拖入的檔案，用工具直接讀這些路徑）\n" + files.joined(separator: "\n")
+        }
+        let imagePaths = saveImages(attachments) + stagedImages
         if !attachments.isEmpty {
+            var parts: [String] = []
+            if !imagePaths.isEmpty { parts.append("\(imagePaths.count) 張圖") }
+            if !texts.isEmpty { parts.append("\(texts.count) 段文字") }
+            if !files.isEmpty { parts.append("\(files.count) 個檔案") }
             store.upsertStep(id: "attach-\(Date().timeIntervalSince1970)",
-                             title: "📎 \(imagePaths.count) 張截圖、\(texts.count) 段文字",
+                             title: "📎 " + parts.joined(separator: "、"),
                              running: false, failed: false)
         }
 

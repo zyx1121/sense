@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// borderless panel 必須 override canBecomeKey，input TextField 才拿得到焦點打字。
 final class KeyablePanel: NSPanel {
@@ -53,7 +54,9 @@ final class SummaryWindow {
         panel.level = .floating
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.hasShadow = true
+        // 視窗陰影在 glass 圓角邊緣積成一圈硬黑框（user 視角是「黑色 border」）— 關掉，
+        // 層次感交給 glassEffect 自己的 rim（notch panel 同款設定）
+        panel.hasShadow = false
         // 背景拖曳會攔掉逐字稿的拖曳選字 — 移動視窗只走頂部標題列（WindowDragGesture）
         panel.isMovableByWindowBackground = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
@@ -97,6 +100,9 @@ struct TranscriptView: View {
     @Bindable var store: TranscriptStore
     let controller: AgentController
 
+    /// Finder 檔案拖到 overlay 上方時亮框提示。
+    @State private var dropTargeted = false
+
     /// feed step 與輸入框 icon 共用的 gutter 寬 — 所有 icon 的中心落在同一條垂直線。
     private var iconGutter: CGFloat { sz(16) }
 
@@ -111,6 +117,15 @@ struct TranscriptView: View {
                     .font(.system(size: sz(13), weight: .semibold))
                     .foregroundStyle(.white.opacity(0.85))
                 Spacer(minLength: 0)
+                Button {
+                    store.togglePin()
+                } label: {
+                    Image(systemName: store.pinned ? "pin.fill" : "pin")
+                        .font(.system(size: sz(11)))
+                        .foregroundStyle(store.pinned ? .cyan.opacity(0.9) : .white.opacity(0.35))
+                }
+                .buttonStyle(.plain)
+                .help(store.pinned ? "取消釘選（恢復閒置自動收合）" : "釘選（不自動收合）")
             }
             .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 8)
             .contentShape(.rect)
@@ -225,6 +240,17 @@ struct TranscriptView: View {
         .frame(width: sz(360))
         .fixedSize(horizontal: false, vertical: true)
         .glassEffect(in: .rect(cornerRadius: 16))
+        // Finder 拖檔進來 → chips（圖片走 -i、其他留路徑給 codex 讀）
+        .overlay {
+            if dropTargeted {
+                RoundedRectangle(cornerRadius: 16)
+                    .strokeBorder(.cyan.opacity(0.6), lineWidth: 1.5)
+            }
+        }
+        .dropDestination(for: URL.self) { urls, _ in
+            controller.addDroppedFiles(urls)
+            return !urls.isEmpty
+        } isTargeted: { dropTargeted = $0 }
         .animation(.spring(response: 0.4, dampingFraction: 0.82), value: store.transcriptEmpty)
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: store.feed.count)
         .environment(\.openURL, OpenURLAction(handler: openFeedLink))
@@ -347,6 +373,12 @@ struct TranscriptView: View {
                 Text(s.replacingOccurrences(of: "\n", with: " ").prefix(14))
                     .font(.system(size: 10)).foregroundStyle(.white.opacity(0.7))
                     .lineLimit(1)
+            case .file(let path):
+                Image(systemName: asset.isImageLike ? "photo" : "doc")
+                    .font(.system(size: 10)).foregroundStyle(.white.opacity(0.6))
+                Text((path as NSString).lastPathComponent)
+                    .font(.system(size: 10)).foregroundStyle(.white.opacity(0.7))
+                    .lineLimit(1).frame(maxWidth: 110)
             }
             Button {
                 store.removeAttachment(asset)
@@ -362,7 +394,7 @@ struct TranscriptView: View {
         .contextMenu {
             Button("翻譯") { controller.quickAction(.translate, on: asset) }
             Button("解釋") { controller.quickAction(.explain, on: asset) }
-            if case .image = asset.kind {
+            if asset.isImageLike {
                 Button("抄錄文字") { controller.quickAction(.transcribe, on: asset) }
             }
             Divider()

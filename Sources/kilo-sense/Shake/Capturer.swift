@@ -3,11 +3,13 @@ import ApplicationServices
 import CoreGraphics
 import Foundation
 import ScreenCaptureKit
+import UniformTypeIdentifiers
 
-/// 一次捕捉的素材：文字 role 收文字、其他收 bounds 截圖。
+/// 一次捕捉的素材：文字 role 收文字、其他收 bounds 截圖；Finder 拖入的非圖片檔留路徑。
 enum AssetKind {
     case text(String)
     case image(NSImage)
+    case file(String)  // 絕對路徑 — 不讀內容進 prompt，codex 自己用工具讀
 }
 
 struct Asset: Identifiable {
@@ -20,6 +22,7 @@ struct Asset: Identifiable {
         switch kind {
         case .text: return "text"
         case .image: return "image"
+        case .file: return "file"
         }
     }
 
@@ -30,6 +33,19 @@ struct Asset: Identifiable {
             return String(oneLine.prefix(80))
         case .image(let img):
             return "image \(Int(img.size.width))×\(Int(img.size.height))"
+        case .file(let path):
+            return (path as NSString).lastPathComponent
+        }
+    }
+
+    /// 是不是「圖」：截圖 asset 或拖入的圖片檔（chip icon、「抄錄文字」選單用）。
+    var isImageLike: Bool {
+        switch kind {
+        case .image: return true
+        case .file(let p):
+            return UTType(filenameExtension: (p as NSString).pathExtension)?
+                .conforms(to: .image) == true
+        case .text: return false
         }
     }
 

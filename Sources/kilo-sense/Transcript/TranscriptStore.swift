@@ -160,6 +160,15 @@ final class TranscriptStore {
         touchOverlay()
     }
 
+    // — 釘選：釘住就不閒置收合（header pin 鈕切換，跨啟動記住）—
+    private(set) var pinned = UserDefaults.standard.bool(forKey: "overlayPinned")
+
+    func togglePin() {
+        pinned.toggle()
+        UserDefaults.standard.set(pinned, forKey: "overlayPinned")
+        touchOverlay()  // 取消釘選的當下重新起算閒置計時
+    }
+
     // — overlay 可見性：shake / 打字 / agent 活動 / hover 續命，閒置自動收合 —
     // 聲音（逐字稿流入）刻意不續命：那是 notch 的展開條件，overlay 只跟「使用者在動它」走。
     private(set) var overlayShown = true
@@ -357,7 +366,7 @@ final class TranscriptStore {
             while let self, !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(overlayIdleSeconds))
                 guard !Task.isCancelled else { return }
-                if thinking { continue }  // 回覆進行中不收，醒著等下一輪閒置
+                if thinking || pinned { continue }  // 回覆進行中 / 釘住不收，醒著等下一輪閒置
                 overlayShown = false
                 return
             }
