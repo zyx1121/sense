@@ -163,7 +163,7 @@ struct TranscriptView: View {
                                                 ? String(step.rendered.characters) : step.text)
                                         }
                                         Divider()
-                                        Button("清除對話（開新 session）", role: .destructive) {
+                                        Button("清除對話與逐字稿（開新 session）", role: .destructive) {
                                             controller.clearConversation()
                                         }
                                     }

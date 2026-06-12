@@ -99,11 +99,13 @@ final class AgentController {
         run(instruction: instruction, attachments: attachments, label: instruction)
     }
 
-    /// 重開對話：清 feed、丟 codex session — 下一輪 fresh session（逐字稿與圈選素材不動）。
+    /// 重開對話：清 feed + 畫面逐字稿、丟 codex session — 下一輪 fresh session
+    ///（歸檔的逐字稿不動，圈選素材保留）。
     func clearConversation() {
         convEpoch += 1
         threadID = nil
         store.clearFeed()
+        store.clearTranscript()
     }
 
     /// chip 快捷動作：只消耗那一顆 chip。

@@ -71,7 +71,7 @@ final class StatusBarController: NSObject {
         add(menu, "放大視窗", #selector(zoomIn), key: "=")
         add(menu, "縮小視窗", #selector(zoomOut), key: "-")
         add(menu, "重設視窗大小", #selector(zoomReset), key: "0")
-        add(menu, "清除對話（開新 session）", #selector(clearConversation))
+        add(menu, "清除對話與逐字稿（開新 session）", #selector(clearConversation))
         menu.addItem(.separator())
 
         let perm = NSMenuItem(title: "權限設定", action: nil, keyEquivalent: "")

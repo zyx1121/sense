@@ -133,7 +133,7 @@ make locales   # dump SpeechTranscriber 支援語言
 make logs      # 即時看 Telemetry（asr / polish / agent / shake）
 ```
 
-裝好後選單列會有 Kilo 圖示 — 開逐字稿資料夾、縮放 overlay（overlay 聚焦時 ⌘= / ⌘- / ⌘0）、清除對話（或在輸入框打 `/clear`）、權限設定、開機自啟、重啟、結束都在那。overlay 拖頂部標題列移動；輸入框與選取文字支援標準 ⌘C / ⌘V / ⌘X / ⌘A / ⌘Z。
+裝好後選單列會有 Kilo 圖示 — 開逐字稿資料夾、縮放 overlay（overlay 聚焦時 ⌘= / ⌘- / ⌘0）、清除對話與畫面逐字稿（或在輸入框打 `/clear`；已歸檔的不動）、權限設定、開機自啟、重啟、結束都在那。overlay 拖頂部標題列移動；輸入框與選取文字支援標準 ⌘C / ⌘V / ⌘X / ⌘A / ⌘Z。
 
 ## 分發（給別人）
 
