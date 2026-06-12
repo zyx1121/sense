@@ -140,6 +140,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let controller = AgentController(store: transcript, agent: agent, metrics: metrics,
                                          polisher: polisher, speakers: speakerTimeline,
                                          isMeeting: { [weak self] in self?.meetingMode?.isOn == true })
+        controller.pumpProvider = { [weak self] in self?.speakerPump }  // /name 聲紋註冊用
         self.agentController = controller
         let win = SummaryWindow(store: transcript, controller: controller)
         win.show()

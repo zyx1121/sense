@@ -23,6 +23,9 @@ final class AttributionEnricher {
     var pumpProvider: (() -> SpeakerDiarizerPump?)?
     /// 上一輪的 letter→name 提案 — enroll 的一致性閘用。
     private var lastNameProposals: [String: String] = [:]
+    /// 提案對應的匿名世代 — enroll（含 /name）會重排字母，跨世代的「講者 A」是
+    /// 不同人，舊提案餵一致性閘會把舊名字燒進新講者的聲紋。
+    private var proposalGeneration = 0
 
     init(store: TranscriptStore, timeline: SpeakerTimeline) {
         self.store = store
@@ -47,6 +50,15 @@ final class AttributionEnricher {
 
     private func maybeRun() async {
         guard !running, store.turnsVersion != lastVersion else { return }
+        // 字母世代換了（剛 enroll 過）：舊提案作廢、舊輪替史丟掉（裡面的「講者 A」
+        // 指向重排前的另一個人），這輪跳過 — 下一輪用乾淨素材重建
+        if timeline.anonymousGeneration != proposalGeneration {
+            proposalGeneration = timeline.anonymousGeneration
+            lastNameProposals = [:]
+            store.clearRecentTurns()
+            lastVersion = store.turnsVersion
+            return
+        }
         let turns = speakerTurns()
         let letters = Set(turns.map(\.letter))
         guard letters.count >= 2 else { return }  // 單講者沒歸屬可推

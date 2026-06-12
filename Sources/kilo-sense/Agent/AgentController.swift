@@ -36,6 +36,8 @@ final class AgentController {
     private let isMeeting: () -> Bool
     private let sources = SourceTracker()
     private let screenCapturer = Capturer()
+    /// /name 自定義命名要把聲紋送進 pump enroll（pump 延遲建立，用 provider 拿）。
+    var pumpProvider: (() -> SpeakerDiarizerPump?)?
     private var threadID: String?  // codex session，app 重啟歸零
     /// 對話世代 — /clear 遞增；飛行中 turn 的 .thread event 帶舊世代回來時
     /// 不寫回 threadID（否則 submit 後 0.5-2s 內 /clear 會被默默復活 session）。
@@ -97,9 +99,44 @@ final class AgentController {
             clearConversation()
             return
         }
+        // /name A 王小明 — 使用者直接命名匿名講者並註冊聲紋。user 確認是最高權威，
+        // 不走 enricher 的兩輪一致閘；之後跨 session 純聲學認人。
+        if instruction.lowercased().hasPrefix("/name") {
+            nameSpeaker(String(instruction.dropFirst(5)).trimmingCharacters(in: .whitespaces))
+            return
+        }
         let attachments = store.attachments
         store.clearAttachments()
         run(instruction: instruction, attachments: attachments, label: instruction)
+    }
+
+    /// /name <講者字母> <名字>：撈該講者近期聲音片段送 enroll。
+    /// 樣本不足（<3s）pump 會記 log 跳過 — feed 提示寫明「樣本足夠即生效」。
+    private func nameSpeaker(_ args: String) {
+        let usage = "用法：/name <講者字母> <名字>，例如 /name A 王小明"
+        let parts = args.split(separator: " ", maxSplits: 1).map(String.init)
+        guard parts.count == 2 else { store.appendError(usage); return }
+        let letter = parts[0].replacingOccurrences(of: "講者", with: "")
+            .replacingOccurrences(of: "對方", with: "")
+            .trimmingCharacters(in: .whitespaces).uppercased()
+        let name = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
+        guard letter.count == 1, ("A"..."Z").contains(letter), !name.isEmpty else {
+            store.appendError(usage); return
+        }
+        let ranges = speakers.segmentRanges(forLetter: letter)
+        guard !ranges.isEmpty else {
+            store.appendError("找不到講者 \(letter) 的聲音片段 — 畫面上要先出現過「講者 \(letter)」")
+            return
+        }
+        guard let pump = pumpProvider?() else {
+            store.appendError("分人引擎還沒啟動（要先有語音在播）")
+            return
+        }
+        pump.requestEnroll(name: name, ranges: ranges)
+        store.upsertStep(id: "name-\(letter)-\(name)",
+                         title: "講者 \(letter) → \(name)（聲紋註冊中，樣本足夠即生效）",
+                         running: false, failed: false)
+        store.touchOverlay()
     }
 
     /// 重開對話：清 feed + 畫面逐字稿、丟 codex session — 下一輪 fresh session
