@@ -44,7 +44,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var meetingMode: MeetingMode?
     private let speakerTimeline = SpeakerTimeline()
     private var speakerPump: SpeakerDiarizerPump?
-    private var enricher: AttributionEnricher?
 
     func applicationDidFinishLaunching(_: Notification) {
         Task.detached { _ = CodexAgent.shellPath }  // 背景預熱 codex PATH 解析（GUI app 貧瘠環境用）
@@ -55,12 +54,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         startPipeline()
         startPushToTalk()
         setUpMeetingMode()
-        // LLM 講者命名：背景低頻把「講者 A」進化成「小明 / 旁白」（無 key 自動停用），
-        // 推出真名後 enroll 聲紋 → 跨內容/跨啟動直接認人
-        let enricher = AttributionEnricher(store: transcript, timeline: speakerTimeline)
-        enricher.pumpProvider = { [weak self] in self?.speakerPump }
-        enricher.start()
-        self.enricher = enricher
+        // LLM 自動命名（AttributionEnricher）已下線 — mini 在真實 podcast 的歸屬
+        // 不可靠（鏡像對調、被髒輪替標籤帶偏），Loki 裁決：未知講者統一 講者 A/B/C
+        // 軟體區分，命名只走手動（/name、右鍵）→ enroll 聲紋後跨 session 認人。
 
         // 有聲紋庫 → 開機預熱 diarizer + re-enroll，第一句語音就認得人（否則跟首句賽跑會 miss）
         if !VoiceStore.loadAll().isEmpty {

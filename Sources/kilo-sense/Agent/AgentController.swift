@@ -143,6 +143,9 @@ final class AgentController {
         store.touchOverlay()
     }
 
+    /// 畫面上活躍的匿名講者字母（右鍵「命名講者 X…」選單用）。
+    func anonymousLetters() -> [String] { speakers.anonymousLetters }
+
     /// 重開對話：清 feed + 畫面逐字稿、丟 codex session — 下一輪 fresh session
     ///（歸檔的逐字稿不動，圈選素材保留）。
     func clearConversation() {

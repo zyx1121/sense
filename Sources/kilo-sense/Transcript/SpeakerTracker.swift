@@ -374,6 +374,9 @@ final class SpeakerTimeline {
         displayNames[l] != nil
     }
 
+    /// 目前已配出的匿名講者字母（A、B、C…）— 右鍵命名選單的選項來源。
+    var anonymousLetters: [String] { letters.values.sorted() }
+
     /// 某字母講者近期的時間片段（給聲紋註冊撈音訊）：新到舊、總長封頂 15s。
     func segmentRanges(forLetter letter: String) -> [(start: Double, end: Double)] {
         guard let speaker = letters.first(where: { $0.value == letter })?.key else { return [] }

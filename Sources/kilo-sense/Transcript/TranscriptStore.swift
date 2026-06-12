@@ -219,31 +219,40 @@ final class TranscriptStore {
     /// 來源也斷批：會議模式我（mic）/ 對方（系統音）交錯時，批次混源會讓歸檔的
     /// 出處標頭張冠李戴。boundary = 後面接著別的語言或來源（提示 polisher 別等湊字數、快點沖掉）。
     /// 來源在這裡（讀取時）才解析講者標籤 — 見 speakerResolver 註解。
-    func firstPendingRun() -> (locale: String, text: String, segments: Int, boundary: Bool,
-                               source: String?, isSpeaker: Bool, timeRange: CMTimeRange?)? {
+    /// dropIncompleteTail：滿字數觸發（人還在講）的批次扣住最後一段 final 留給下一批 —
+    /// 批尾可能是講到一半的句子，模型不知道後面還有字會補錯標點、接縫斷錯段。
+    /// 不靠句末標點判斷完整性 — ASR finalize 截斷時也可能帶標點，不可信。
+    /// 換人邊界（切點本來就乾淨）與 idle（人停了）觸發的批不扣；至少留一段成批。
+    func firstPendingRun(dropIncompleteTail: Bool = false)
+        -> (locale: String, text: String, segments: Int, boundary: Bool,
+            source: String?, isSpeaker: Bool, timeRange: CMTimeRange?)? {
         guard !pending.isEmpty else { return nil }
         splitAtSpeakerChange(0)
         let first = pending[0]
         let firstSource = resolvedSource(first)
+        var count = 1
+        var boundary = false
+        while count < pending.count {
+            splitAtSpeakerChange(count)
+            let seg = pending[count]
+            if seg.locale != first.locale || resolvedSource(seg).label != firstSource.label {
+                boundary = true
+                break
+            }
+            count += 1
+        }
+        var n = count
+        if dropIncompleteTail, !boundary, n >= 2 { n -= 1 }
         var text = first.text
-        var n = 1
         // 批次的音訊時間範圍（消耗段的聯集）— 上稿的塊帶著它，之後才能回溯補講者標
         var range = first.timeRange
-        func extend(_ r: CMTimeRange?) {
-            guard let r else { return }
-            range = range.map { CMTimeRange(start: min($0.start, r.start), end: max($0.end, r.end)) } ?? r
-        }
-        while n < pending.count {
-            splitAtSpeakerChange(n)
-            let seg = pending[n]
-            guard seg.locale == first.locale, resolvedSource(seg).label == firstSource.label else {
-                return (first.locale, text, n, true, firstSource.label, firstSource.isSpeaker, range)
+        for i in 1..<n {
+            text = glue(text, pending[i].text)
+            if let r = pending[i].timeRange {
+                range = range.map { CMTimeRange(start: min($0.start, r.start), end: max($0.end, r.end)) } ?? r
             }
-            text = glue(text, seg.text)
-            extend(seg.timeRange)
-            n += 1
         }
-        return (first.locale, text, n, false, firstSource.label, firstSource.isSpeaker, range)
+        return (first.locale, text, n, boundary, firstSource.label, firstSource.isSpeaker, range)
     }
 
     /// 一筆 ASR final 可能橫跨講者換人點（沒長停頓時 final 很長）— 整段 dominantLabel

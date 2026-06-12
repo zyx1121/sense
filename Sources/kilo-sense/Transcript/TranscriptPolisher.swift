@@ -63,18 +63,19 @@ final class TranscriptPolisher {
     func nudge() {
         guard apiKey != nil, !running else { return }
         guard let run = store.firstPendingRun() else { return }
-        if run.text.count >= 60 || run.boundary { kick(); return }
+        // 滿字數觸發 = 人還在講 → 批尾的未完 final 扣給下一批；換人/idle 觸發不扣
+        if run.text.count >= 60 || run.boundary { kick(holdTail: !run.boundary); return }
         idleTask?.cancel()
         idleTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(4))
             guard let self, !Task.isCancelled else { return }
-            kick()
+            kick(holdTail: false)
         }
     }
 
-    private func kick() {
+    private func kick(holdTail: Bool) {
         guard apiKey != nil, !running else { return }
-        guard let run = store.firstPendingRun() else { return }
+        guard let run = store.firstPendingRun(dropIncompleteTail: holdTail) else { return }
         running = true
         idleTask?.cancel()
         let tail = String(store.polished.suffix(120))

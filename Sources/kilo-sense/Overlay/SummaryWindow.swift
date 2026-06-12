@@ -150,6 +150,14 @@ struct TranscriptView: View {
                             .padding(.horizontal, 16)
                             .contextMenu {
                                 Button("複製逐字稿") { copyText(String(transcriptText.characters)) }
+                                // 命名講者：點了在輸入框預填 /name 指令，補上名字送出即 enroll
+                                let letters = controller.anonymousLetters()
+                                if !letters.isEmpty {
+                                    Divider()
+                                    ForEach(letters, id: \.self) { l in
+                                        Button("命名講者 \(l)…") { store.inputDraft = "/name \(l) " }
+                                    }
+                                }
                                 Divider()
                                 Button("清除逐字稿（已存檔的不動）", role: .destructive) {
                                     store.clearTranscript()
