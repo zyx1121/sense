@@ -142,6 +142,24 @@ final class TranscriptStore {
         touchOverlay()
     }
 
+    // — overlay 縮放：⌘= / ⌘- / ⌘0（狀態欄選單同款入口），跨啟動記住 —
+    private(set) var uiScale: CGFloat = {
+        let v = UserDefaults.standard.double(forKey: "overlayScale")
+        return v == 0 ? 1 : CGFloat(min(max(v, 0.8), 1.6))
+    }()
+
+    func zoom(_ delta: CGFloat) {
+        uiScale = min(max(uiScale + delta, 0.8), 1.6)
+        UserDefaults.standard.set(Double(uiScale), forKey: "overlayScale")
+        touchOverlay()
+    }
+
+    func zoomReset() {
+        uiScale = 1
+        UserDefaults.standard.set(1.0, forKey: "overlayScale")
+        touchOverlay()
+    }
+
     // — overlay 可見性：shake / 打字 / agent 活動 / hover 續命，閒置自動收合 —
     // 聲音（逐字稿流入）刻意不續命：那是 notch 的展開條件，overlay 只跟「使用者在動它」走。
     private(set) var overlayShown = true
@@ -320,6 +338,14 @@ final class TranscriptStore {
     }
 
     func setThinking(_ b: Bool) { thinking = b }
+
+    /// 清空 Kilo 對話 feed（/clear、右鍵「清除對話」）— 步驟與打字機歸零；逐字稿與圈選素材不動。
+    /// 還在飛的 turn 事件會落進清空後的 feed — 接受（那是新對話前最後的殘響）。
+    func clearFeed() {
+        replyTask?.cancel(); replyTask = nil
+        feed = []
+        touchOverlay()
+    }
 
     // MARK: - Overlay 可見性
 

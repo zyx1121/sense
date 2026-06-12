@@ -36,6 +36,9 @@ final class AgentController {
     private let sources = SourceTracker()
     private let screenCapturer = Capturer()
     private var threadID: String?  // codex session，app 重啟歸零
+    /// 對話世代 — /clear 遞增；飛行中 turn 的 .thread event 帶舊世代回來時
+    /// 不寫回 threadID（否則 submit 後 0.5-2s 內 /clear 會被默默復活 session）。
+    private var convEpoch = 0
 
     init(store: TranscriptStore, agent: CodexAgent?, metrics: MetricsStore,
          polisher: TranscriptPolisher, speakers: SpeakerTimeline,
@@ -87,9 +90,20 @@ final class AgentController {
     func submit(_ instruction: String) {
         let instruction = instruction.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !instruction.isEmpty else { return }
+        if ["/clear", "/new"].contains(instruction.lowercased()) {
+            clearConversation()
+            return
+        }
         let attachments = store.attachments
         store.clearAttachments()
         run(instruction: instruction, attachments: attachments, label: instruction)
+    }
+
+    /// 重開對話：清 feed、丟 codex session — 下一輪 fresh session（逐字稿與圈選素材不動）。
+    func clearConversation() {
+        convEpoch += 1
+        threadID = nil
+        store.clearFeed()
     }
 
     /// chip 快捷動作：只消耗那一顆 chip。
@@ -143,18 +157,21 @@ final class AgentController {
 
         store.setThinking(true)
         let transcript = store.context
+        let epoch = convEpoch
         Task {
             let start = Date()
             var result = await runTurn(agent, instruction: fullInstruction,
-                                       transcript: transcript, resume: threadID, images: imagePaths)
+                                       transcript: transcript, resume: threadID,
+                                       images: imagePaths, epoch: epoch)
 
             // resume 失敗（session 被 GC / 重開機後不存在）且還沒有任何回覆 → 重開新 session 再試一次
-            if result.error != nil, threadID != nil, !result.gotMessage {
+            if result.error != nil, threadID != nil, !result.gotMessage, epoch == convEpoch {
                 threadID = nil
                 store.upsertStep(id: "resume-retry", title: "session 失效，重開新對話",
                                  running: false, failed: false)
                 result = await runTurn(agent, instruction: fullInstruction,
-                                       transcript: transcript, resume: nil, images: imagePaths)
+                                       transcript: transcript, resume: nil,
+                                       images: imagePaths, epoch: epoch)
             }
 
             if let error = result.error {
@@ -187,14 +204,15 @@ final class AgentController {
 
     /// 跑一輪 codex turn，事件直灌 feed；回傳是否收到回覆與錯誤。
     private func runTurn(_ agent: CodexAgent, instruction: String, transcript: String,
-                         resume: String?, images: [String] = []) async -> (gotMessage: Bool, error: Error?) {
+                         resume: String?, images: [String] = [],
+                         epoch: Int) async -> (gotMessage: Bool, error: Error?) {
         var got = false
         do {
             for try await ev in agent.stream(instruction: instruction,
                                              transcript: transcript, resume: resume, images: images) {
                 switch ev {
                 case .thread(let id):
-                    threadID = id
+                    if epoch == convEpoch { threadID = id }  // /clear 之後的舊 turn 不復活 session
                 case .step(let id, let title, let running, let failed):
                     store.upsertStep(id: id, title: title, running: running, failed: failed)
                 case .message(let text):

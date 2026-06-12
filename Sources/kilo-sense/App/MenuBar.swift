@@ -39,6 +39,13 @@ final class StatusBarController: NSObject {
     var onMeetingToggle: (() -> Bool)?
     private var meetingOn = false
 
+    /// overlay 縮放（main.swift 接 TranscriptStore.zoom）；delta 為 nil = 重設。
+    /// 快捷鍵實際由 KeyablePanel.performKeyEquivalent 處理（overlay 是 key window 時），
+    /// 選單項目標 ⌘= / ⌘- / ⌘0 當功能欄入口與提示。
+    var onZoom: ((CGFloat?) -> Void)?
+    /// 清除 Kilo 對話（main.swift 接 AgentController.clearConversation；輸入框打 /clear 同效）。
+    var onClearConversation: (() -> Void)?
+
     override init() {
         super.init()
         let mark = Brand.mark.copy() as! NSImage
@@ -59,6 +66,13 @@ final class StatusBarController: NSObject {
         meeting.state = meetingOn ? .on : .off
 
         add(menu, "開啟逐字稿資料夾", #selector(openTranscripts))
+
+        menu.addItem(.separator())
+        add(menu, "放大視窗", #selector(zoomIn), key: "=")
+        add(menu, "縮小視窗", #selector(zoomOut), key: "-")
+        add(menu, "重設視窗大小", #selector(zoomReset), key: "0")
+        add(menu, "清除對話（開新 session）", #selector(clearConversation))
+        menu.addItem(.separator())
 
         let perm = NSMenuItem(title: "權限設定", action: nil, keyEquivalent: "")
         let sub = NSMenu()
@@ -105,6 +119,11 @@ final class StatusBarController: NSObject {
         NSWorkspace.shared.open(URL(string:
             "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")!)
     }
+
+    @objc private func zoomIn() { onZoom?(0.1) }
+    @objc private func zoomOut() { onZoom?(-0.1) }
+    @objc private func zoomReset() { onZoom?(nil) }
+    @objc private func clearConversation() { onClearConversation?() }
 
     @objc private func toggleMeeting() {
         meetingOn = onMeetingToggle?() ?? false

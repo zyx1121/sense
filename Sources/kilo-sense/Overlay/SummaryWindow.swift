@@ -4,9 +4,37 @@ import SwiftUI
 /// borderless panel 必須 override canBecomeKey，input TextField 才拿得到焦點打字。
 final class KeyablePanel: NSPanel {
     override var canBecomeKey: Bool { true }
+
+    /// 縮放快捷鍵（⌘= / ⌘- / ⌘0）的出口；delta 為 nil = 重設。
+    var onZoom: ((CGFloat?) -> Void)?
+
+    /// accessory app 沒有 mainMenu，⌘ 快捷鍵沒有 Edit menu 幫忙路由 —
+    /// 自己把標準編輯鍵送回 first responder（TextField / 選取中的文字）。
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        // capsLock 進 deviceIndependentFlagsMask，不剝掉的話大寫鎖定期間全部快捷鍵失效；
+        // charactersIgnoringModifiers 唯獨不忽略 Shift（⌘⇧Z 回 "Z"），統一小寫再比。
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            .subtracting(.capsLock)
+        let key = (event.charactersIgnoringModifiers ?? "").lowercased()
+        if flags == [.command, .shift], key == "z" {
+            return NSApp.sendAction(Selector(("redo:")), to: nil, from: self)
+        }
+        guard flags == .command else { return super.performKeyEquivalent(with: event) }
+        switch key {
+        case "c": return NSApp.sendAction(#selector(NSText.copy(_:)), to: nil, from: self)
+        case "v": return NSApp.sendAction(#selector(NSText.paste(_:)), to: nil, from: self)
+        case "x": return NSApp.sendAction(#selector(NSText.cut(_:)), to: nil, from: self)
+        case "a": return NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: self)
+        case "z": return NSApp.sendAction(Selector(("undo:")), to: nil, from: self)
+        case "=", "+": onZoom?(0.1); return true
+        case "-": onZoom?(-0.1); return true
+        case "0": onZoom?(nil); return true
+        default: return super.performKeyEquivalent(with: event)
+        }
+    }
 }
 
-/// 可拖動的 Kilo overlay：連續逐字稿 + 指令輸入 + agent 步驟 feed。floating、拖背景移動、高度動態。
+/// 可拖動的 Kilo overlay：連續逐字稿 + 指令輸入 + agent 步驟 feed。floating、拖頂部標題列移動、高度動態。
 @MainActor
 final class SummaryWindow {
     private let panel: KeyablePanel
@@ -26,9 +54,13 @@ final class SummaryWindow {
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = true
-        panel.isMovableByWindowBackground = true
+        // 背景拖曳會攔掉逐字稿的拖曳選字 — 移動視窗只走頂部標題列（WindowDragGesture）
+        panel.isMovableByWindowBackground = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.contentViewController = hosting
+        panel.onZoom = { delta in
+            if let delta { store.zoom(delta) } else { store.zoomReset() }
+        }
     }
 
     func show() {
@@ -66,24 +98,37 @@ struct TranscriptView: View {
     let controller: AgentController
 
     /// feed step 與輸入框 icon 共用的 gutter 寬 — 所有 icon 的中心落在同一條垂直線。
-    private let iconGutter: CGFloat = 16
+    private var iconGutter: CGFloat { sz(16) }
+
+    /// 尺寸 × overlay 縮放係數（⌘= / ⌘- 調，UserDefaults 記住）。
+    private func sz(_ v: CGFloat) -> CGFloat { v * store.uiScale }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Kilo")
-                .font(.headline).foregroundStyle(.white.opacity(0.85))
-                .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 8)
+            // 唯一的視窗拖曳把手 — 背景拖曳已關（會吃掉拖曳選字），標題列全寬可拖
+            HStack {
+                Text("Kilo")
+                    .font(.system(size: sz(13), weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.85))
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 8)
+            .contentShape(.rect)
+            .gesture(WindowDragGesture())
+            // 沒這行，panel 非 key 時（overlay 的常態）第一下 click-drag 會被當
+            // activation click 吞掉 — 要點一下再拖第二次才動
+            .allowsWindowActivationEvents()
 
             // 連續逐字稿：白(已整理) → 半白(定稿待整理) → 灰(辨識中，打字機)
             if store.transcriptEmpty {
                 Text("聽取中…")
-                    .font(.system(size: 12)).foregroundStyle(.white.opacity(0.45))
+                    .font(.system(size: sz(12))).foregroundStyle(.white.opacity(0.45))
                     .padding(.horizontal, 16).padding(.bottom, 8)
             } else {
                 ScrollViewReader { proxy in
                     ScrollView {
                         Text(transcriptText)
-                            .font(.system(size: 12))
+                            .font(.system(size: sz(12)))
                             .lineSpacing(3.5)
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -97,7 +142,7 @@ struct TranscriptView: View {
                             }
                         Color.clear.frame(height: 1).id("bottom")
                     }
-                    .frame(height: 230)
+                    .frame(height: sz(230))
                     .onChange(of: store.transcriptLength) { _, _ in
                         proxy.scrollTo("bottom", anchor: .bottom)
                     }
@@ -117,6 +162,10 @@ struct TranscriptView: View {
                                             copyText(step.kind == .reply
                                                 ? String(step.rendered.characters) : step.text)
                                         }
+                                        Divider()
+                                        Button("清除對話（開新 session）", role: .destructive) {
+                                            controller.clearConversation()
+                                        }
                                     }
                             }
                             Color.clear.frame(height: 1).id("feedBottom")
@@ -124,7 +173,7 @@ struct TranscriptView: View {
                         .padding(.horizontal, 16).padding(.vertical, 8)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .frame(maxHeight: 280)  // 內容少照內容高，多了封頂開捲
+                    .frame(maxHeight: sz(280))  // 內容少照內容高，多了封頂開捲
                     .onChange(of: store.feedLength) { _, _ in
                         proxy.scrollTo("feedBottom", anchor: .bottom)
                     }
@@ -149,23 +198,23 @@ struct TranscriptView: View {
             HStack(spacing: 8) {
                 if store.pttRecording {
                     Image(systemName: "mic.fill")
-                        .font(.system(size: 12)).foregroundStyle(.red.opacity(0.9))
+                        .font(.system(size: sz(12))).foregroundStyle(.red.opacity(0.9))
                         .frame(width: iconGutter)
                 } else {
-                    KiloMark(size: 12)
+                    KiloMark(size: sz(12))
                         .foregroundStyle(.white.opacity(0.45))
                         .frame(width: iconGutter)  // 跟 feed step 的 icon 對齊同一條垂直線
                 }
                 TextField(store.pttRecording ? "聽你說…" : "問 Kilo，或叫它記錄…（按住右 ⇧ 說話）",
                           text: $store.inputDraft)
-                    .textFieldStyle(.plain).font(.system(size: 12)).foregroundStyle(.white)
+                    .textFieldStyle(.plain).font(.system(size: sz(12))).foregroundStyle(.white)
                     .onSubmit { controller.submit(store.inputDraft); store.inputDraft = "" }
                 if store.thinking { ProgressView().controlSize(.small) }
                 Button {
                     controller.captureScreen()
                 } label: {
                     Image(systemName: "camera.viewfinder")
-                        .font(.system(size: 13)).foregroundStyle(.white.opacity(0.45))
+                        .font(.system(size: sz(13))).foregroundStyle(.white.opacity(0.45))
                 }
                 .buttonStyle(.plain)
                 .help("截整個螢幕給 Kilo 看")
@@ -173,7 +222,7 @@ struct TranscriptView: View {
             .padding(.horizontal, 16).padding(.vertical, 9)
             .background(.white.opacity(0.06))
         }
-        .frame(width: 360)
+        .frame(width: sz(360))
         .fixedSize(horizontal: false, vertical: true)
         .glassEffect(in: .rect(cornerRadius: 16))
         .animation(.spring(response: 0.4, dampingFraction: 0.82), value: store.transcriptEmpty)
@@ -237,21 +286,21 @@ struct TranscriptView: View {
     private func stepIcon(_ step: AgentStep) -> some View {
         switch step.kind {
         case .user:
-            KiloMark(size: 12).foregroundStyle(.white.opacity(0.45))
+            KiloMark(size: sz(12)).foregroundStyle(.white.opacity(0.45))
         case .tool:
             if step.running {
                 ProgressView().controlSize(.mini)
             } else {
                 Image(systemName: step.failed ? "xmark.circle" : "checkmark.circle")
-                    .font(.system(size: 11))
+                    .font(.system(size: sz(11)))
                     .foregroundStyle(step.failed ? .red.opacity(0.8) : .white.opacity(0.35))
             }
         case .reply:
             // Kilo 說話的標記（cyan），跟 user 的灰 mark 形成你問它答的對話節奏
-            KiloMark(size: 12).foregroundStyle(.cyan.opacity(0.9))
+            KiloMark(size: sz(12)).foregroundStyle(.cyan.opacity(0.9))
         case .error:
             Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 10)).foregroundStyle(.orange.opacity(0.9))
+                .font(.system(size: sz(10))).foregroundStyle(.orange.opacity(0.9))
         }
     }
 
@@ -260,24 +309,24 @@ struct TranscriptView: View {
         switch step.kind {
         case .user:
             Text(step.text)
-                .font(.system(size: 12)).foregroundStyle(.white.opacity(0.55))
+                .font(.system(size: sz(12))).foregroundStyle(.white.opacity(0.55))
                 .lineLimit(2)
                 .frame(maxWidth: .infinity, alignment: .leading)
         case .tool:
             Text(step.text)
-                .font(.system(size: 10.5, design: .monospaced))
+                .font(.system(size: sz(10.5), design: .monospaced))
                 .foregroundStyle(.white.opacity(0.5))
                 .lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .leading)
         case .reply:
             Text(prefix(step.rendered, step.shownChars))
-                .font(.system(size: 12)).foregroundStyle(.cyan.opacity(0.9))
+                .font(.system(size: sz(12))).foregroundStyle(.cyan.opacity(0.9))
                 .lineSpacing(2.5)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
         case .error:
             Text(step.text)
-                .font(.system(size: 11)).foregroundStyle(.orange.opacity(0.9))
+                .font(.system(size: sz(11))).foregroundStyle(.orange.opacity(0.9))
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
     }

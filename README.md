@@ -133,7 +133,7 @@ make locales   # dump SpeechTranscriber supported languages
 make logs      # live Telemetry (asr / polish / agent / shake)
 ```
 
-Once installed, a Kilo item appears in the menu bar — open the transcript folder, permission shortcuts, launch-at-login, restart, quit.
+Once installed, a Kilo item appears in the menu bar — open the transcript folder, resize the overlay (⌘= / ⌘- / ⌘0 while the overlay is focused), clear the conversation (or type `/clear` in the input), permission shortcuts, launch-at-login, restart, quit. The overlay moves by dragging its title bar; standard ⌘C / ⌘V / ⌘X / ⌘A / ⌘Z work in the input field and on selected text.
 
 ## Distribution (sharing it)
 

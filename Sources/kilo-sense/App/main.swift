@@ -144,6 +144,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let win = SummaryWindow(store: transcript, controller: controller)
         win.show()
         summaryWindow = win
+
+        // 狀態欄的 overlay 控制（縮放 / 清除對話）— 跟 panel 快捷鍵、輸入框 /clear 同一套出口
+        statusBar?.onZoom = { [weak self] delta in
+            guard let store = self?.transcript else { return }
+            if let delta { store.zoom(delta) } else { store.zoomReset() }
+        }
+        statusBar?.onClearConversation = { [weak self] in
+            self?.agentController?.clearConversation()
+        }
     }
 
     private func startPipeline() {
