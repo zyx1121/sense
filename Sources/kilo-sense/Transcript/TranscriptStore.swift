@@ -87,6 +87,8 @@ struct PendingSegment {
     let text: String
     let source: String?  // fallback 來源（前景 app）；講者標籤在讀取時才解析
     var timeRange: CMTimeRange? = nil
+    /// word 級時間切片 — 一筆 final 可能橫跨講者換人點，取批前靠這個在邊界切段。
+    var pieces: [(text: String, range: CMTimeRange)] = []
 }
 
 /// 逐字稿連續文件流 + Kilo agent 步驟 feed。window 顯示、codex agent 讀來思考。
@@ -194,13 +196,15 @@ final class TranscriptStore {
     }
 
     func commitFinal(_ text: String, locale: String, source: String? = nil,
-                     timeRange: CMTimeRange? = nil) {
+                     timeRange: CMTimeRange? = nil,
+                     pieces: [(text: String, range: CMTimeRange)] = []) {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         volatileTask?.cancel(); volatileTask = nil
         volatileTarget = ""; volatileShown = ""
         guard !t.isEmpty else { return }
         pending.append(PendingSegment(locale: locale, text: t, source: source,
-                                      timeRange: timeRange))  // 一筆 final 一段，不合併 — polisher 按段消耗才不會吃到飛中的新字
+                                      timeRange: timeRange,
+                                      pieces: pieces))  // 一筆 final 一段，不合併 — polisher 按段消耗才不會吃到飛中的新字
         while pendingRaw.count > 12000, !pending.isEmpty { pending.removeFirst() }  // 無 polisher 時的安全閥
     }
 
@@ -210,11 +214,15 @@ final class TranscriptStore {
     /// 來源在這裡（讀取時）才解析講者標籤 — 見 speakerResolver 註解。
     func firstPendingRun() -> (locale: String, text: String, segments: Int, boundary: Bool,
                                source: String?, isSpeaker: Bool)? {
-        guard let first = pending.first else { return nil }
+        guard !pending.isEmpty else { return nil }
+        splitAtSpeakerChange(0)
+        let first = pending[0]
         let firstSource = resolvedSource(first)
         var text = first.text
         var n = 1
-        for seg in pending.dropFirst() {
+        while n < pending.count {
+            splitAtSpeakerChange(n)
+            let seg = pending[n]
             guard seg.locale == first.locale, resolvedSource(seg).label == firstSource.label else {
                 return (first.locale, text, n, true, firstSource.label, firstSource.isSpeaker)
             }
@@ -222,6 +230,52 @@ final class TranscriptStore {
             n += 1
         }
         return (first.locale, text, n, false, firstSource.label, firstSource.isSpeaker)
+    }
+
+    /// 一筆 ASR final 可能橫跨講者換人點（沒長停頓時 final 很長）— 整段 dominantLabel
+    /// 擇多會把前一講者的尾巴掛給講比較多的下一位。取批前用 word 級時間片把跨講者的
+    /// 段物理切開，前後各自成段、各自掛標。<1s 的講者群視為 diarizer 邊界抖動併回前群。
+    private func splitAtSpeakerChange(_ i: Int) {
+        guard let resolver = speakerResolver, i < pending.count else { return }
+        let seg = pending[i]
+        guard seg.pieces.count >= 2 else { return }
+
+        // 逐片解析講者 → 連續同講者分組；查無講者（nil）跟著前群走，不自成邊界
+        var groups: [(label: String?, pieces: [(text: String, range: CMTimeRange)])] = []
+        for p in seg.pieces {
+            let label = resolver(p.range)
+            if groups.isEmpty || (label != nil && label != groups[groups.count - 1].label) {
+                groups.append((label, [p]))
+            } else {
+                groups[groups.count - 1].pieces.append(p)
+            }
+        }
+        // 開頭查無講者的片段（diarizer 還沒蓋到）併進下一群
+        if groups.count >= 2, groups[0].label == nil {
+            groups[1].pieces.insert(contentsOf: groups[0].pieces, at: 0)
+            groups.removeFirst()
+        }
+        // 短群 = 邊界抖動，併回前群（標籤維持前群的）
+        var merged: [(label: String?, pieces: [(text: String, range: CMTimeRange)])] = []
+        for g in groups {
+            let dur = g.pieces.last!.range.end.seconds - g.pieces.first!.range.start.seconds
+            if !merged.isEmpty, dur < 1.0 {
+                merged[merged.count - 1].pieces += g.pieces
+            } else {
+                merged.append(g)
+            }
+        }
+        guard merged.count >= 2 else { return }
+
+        Telemetry.asr.info("segment split at speaker change: \(merged.map { "\($0.label ?? "?")(\($0.pieces.count))" }.joined(separator: " | "), privacy: .public)")
+        pending.replaceSubrange(i...i, with: merged.map { g in
+            PendingSegment(
+                locale: seg.locale,
+                text: g.pieces.map(\.text).joined().trimmingCharacters(in: .whitespacesAndNewlines),
+                source: seg.source,
+                timeRange: CMTimeRange(start: g.pieces.first!.range.start, end: g.pieces.last!.range.end),
+                pieces: g.pieces)
+        })
     }
 
     /// 段落的有效來源：講者標籤（時間範圍查得到）優先，否則 fallback 收錄當下的前景 app。
@@ -241,7 +295,11 @@ final class TranscriptStore {
     @discardableResult
     func commitPolished(_ cleaned: String, locale: String, consumedSegments: Int,
                         source: String? = nil, isSpeaker: Bool = false, epoch: Int? = nil) -> String? {
-        pending.removeFirst(min(consumedSegments, pending.count))
+        // 清除後才落地的批：它消耗的段已被 clearTranscript 清空，再 removeFirst 會吃掉
+        // 清除後新進的段（沒整理沒歸檔直接蒸發）— 過期批不消耗
+        if epoch == nil || epoch == transcriptEpoch {
+            pending.removeFirst(min(consumedSegments, pending.count))
+        }
         let c = breakLines(trimOverlap(cleaned.trimmingCharacters(in: .whitespacesAndNewlines)))
         guard !c.isEmpty else { return nil }
         if let epoch, epoch != transcriptEpoch { return c }  // 清除後才回來的批：歸檔照走、畫面不復活

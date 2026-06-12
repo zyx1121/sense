@@ -74,8 +74,10 @@ final class AgentController {
     /// 每段定稿進逐字稿（顯示 + codex context），並戳 polisher 整理。
     /// 帶 timeRange 進 pending — 講者標籤在 polisher 取批時才解析（speakerResolver），
     /// 這裡只記 fallback 來源（前景 app）。locale 跟著進 pending（整理選對指令語言）。
-    func appendFinal(_ text: String, locale: String, timeRange: CMTimeRange? = nil) {
-        store.commitFinal(text, locale: locale, source: sources.current(), timeRange: timeRange)
+    func appendFinal(_ text: String, locale: String, timeRange: CMTimeRange? = nil,
+                     pieces: [(text: String, range: CMTimeRange)] = []) {
+        store.commitFinal(text, locale: locale, source: sources.current(), timeRange: timeRange,
+                          pieces: pieces)
         metrics.recordSegment(chars: text.count)
         polisher.nudge()
     }
