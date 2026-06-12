@@ -285,15 +285,15 @@ final class TranscriptStore {
         if !cur.isEmpty { sentences.append(cur) }
         guard sentences.count >= 2 else { return }
 
-        // 2. 句級多數決 → 連續同講者分組；查無講者（nil）跟著前群走，不自成邊界
+        // 2. 句級多數決 → 按原始 label 分組（nil 先不吸收，後面分位置處理）
         var groups: [(label: String?, pieces: [(text: String, range: CMTimeRange)])] = []
         for s in sentences {
             let range = CMTimeRange(start: s.first!.range.start, end: s.last!.range.end)
             let label = resolver(range)
-            if groups.isEmpty || (label != nil && label != groups[groups.count - 1].label) {
-                groups.append((label, s))
-            } else {
+            if let last = groups.last, last.label == label {
                 groups[groups.count - 1].pieces += s
+            } else {
+                groups.append((label, s))
             }
         }
         // 開頭查無講者的片段（diarizer 還沒蓋到）併進下一群
@@ -301,11 +301,15 @@ final class TranscriptStore {
             groups[1].pieces.insert(contentsOf: groups[0].pieces, at: 0)
             groups.removeFirst()
         }
-        // 短群 = 邊界抖動，併回前群（標籤維持前群的）
+        // 中段 nil 與 <1s 短群（邊界抖動）併回前群；**結尾的 nil 群保持獨立** —
+        // 換手瞬間 diarizer 常來不及判定，那幾句多半是下一個講者的開場白，
+        // 掛給前一講者會吃掉對方的第一句（實戰：來賓的「博恩好，大家好」被掛給主持人）。
+        // 獨立成段留在 pending，下輪 nudge 時 diarizer 已收斂、自然歸對戶。
         var merged: [(label: String?, pieces: [(text: String, range: CMTimeRange)])] = []
-        for g in groups {
+        for (idx, g) in groups.enumerated() {
+            let trailingNil = g.label == nil && idx == groups.count - 1
             let dur = g.pieces.last!.range.end.seconds - g.pieces.first!.range.start.seconds
-            if !merged.isEmpty, dur < 1.0 {
+            if !merged.isEmpty, !trailingNil, g.label == nil || dur < 1.0 {
                 merged[merged.count - 1].pieces += g.pieces
             } else {
                 merged.append(g)
@@ -404,17 +408,23 @@ final class TranscriptStore {
     }
 
     /// 句末標點後斷行：中文「。！？」直接斷；英文「. ! ?」後接空格才斷（"U.S. Army" 會誤斷，接受）。
+    /// 引號內不斷行 — 「…生氣嗎？…更生氣。」拆段會把收尾的」孤兒化（quote 深度歸零才斷；
+    /// 不平衡的引號只影響該批，下一批深度重置）。
     /// 最後統一成「段落間空一行」（\n\n）— 模型自己給的換行也一併正規化，鬆緊一致。
     private func breakLines(_ s: String) -> String {
         let chars = Array(s)
         var out = String()
         out.reserveCapacity(chars.count + 16)
+        var depth = 0
         var i = 0
         while i < chars.count {
             let c = chars[i]
+            if "「『".contains(c) { depth += 1 }
+            if "」』".contains(c) { depth = max(0, depth - 1) }
             out.append(c)
-            let cjkEnd = "。！？".contains(c)
-            let asciiEnd = ".!?".contains(c) && i + 1 < chars.count && chars[i + 1] == " "
+            let cjkEnd = "。！？".contains(c) && depth == 0
+            let asciiEnd = ".!?".contains(c) && depth == 0
+                && i + 1 < chars.count && chars[i + 1] == " "
             if cjkEnd || asciiEnd {
                 var j = i + 1
                 while j < chars.count, chars[j] == " " { j += 1 }   // 句後空白換成斷行
