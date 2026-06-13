@@ -83,6 +83,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         usageItem = usage
         refreshUsage()
         menu.addItem(usage)
+        add(menu, "匯出用量報告…", #selector(exportUsageReport))
         menu.addItem(.separator())
 
         let meeting = add(menu, "會議模式（錄下我的發言）", #selector(toggleMeeting), key: "m")
@@ -126,6 +127,18 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         let dir = kiloWorkdir + "/transcripts"
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         NSWorkspace.shared.open(URL(fileURLWithPath: dir))
+    }
+
+    /// 用量報告 → ~/.kilo/usage-report.md 並開啟（可直接貼給老闆）。
+    @objc private func exportUsageReport() {
+        let md = metrics.reportMarkdown(generatedAt: Date())
+        let path = kiloWorkdir + "/usage-report.md"
+        do {
+            try md.write(toFile: path, atomically: true, encoding: .utf8)
+            NSWorkspace.shared.open(URL(fileURLWithPath: path))
+        } catch {
+            logErr("匯出用量報告失敗：\(error.localizedDescription)")
+        }
     }
 
     @objc private func openAccessibility() {

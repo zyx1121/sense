@@ -5,6 +5,7 @@ enum CodexEvent: Sendable {
     case thread(String)                                                // session id，下輪 resume 用
     case step(id: String, title: String, running: Bool, failed: Bool)  // tool / exec 步驟
     case message(String)                                               // agent 一則完整回覆
+    case usage(prompt: Int, cached: Int, completion: Int)              // turn.completed 的 token 用量
 }
 
 /// codex exec 當 agent engine：workspace-write 圈在 workdir、小 model + minimal reasoning 求快。
@@ -174,8 +175,13 @@ struct CodexAgent: Sendable {
         case "turn.failed":
             let msg = ((obj["error"] as? [String: Any])?["message"] as? String) ?? "turn failed"
             return [.message("⚠️ \(msg)")]
+        case "turn.completed":
+            guard let u = obj["usage"] as? [String: Any] else { return [] }
+            return [.usage(prompt: u["input_tokens"] as? Int ?? 0,
+                           cached: u["cached_input_tokens"] as? Int ?? 0,
+                           completion: u["output_tokens"] as? Int ?? 0)]
         default:
-            return []  // turn.started / turn.completed
+            return []  // turn.started
         }
     }
 

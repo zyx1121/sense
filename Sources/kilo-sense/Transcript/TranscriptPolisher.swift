@@ -142,10 +142,7 @@ final class TranscriptPolisher {
               let choices = json["choices"] as? [[String: Any]],
               let content = (choices.first?["message"] as? [String: Any])?["content"] as? String
         else { return "" }
-        if let usage = json["usage"] as? [String: Any] {
-            metrics.recordLLMUsage(prompt: usage["prompt_tokens"] as? Int ?? 0,
-                                   completion: usage["completion_tokens"] as? Int ?? 0)
-        }
+        recordUsage(json)
         return content.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
@@ -175,11 +172,17 @@ final class TranscriptPolisher {
             throw NSError(domain: "Polish", code: 1,
                           userInfo: [NSLocalizedDescriptionKey: "polish API error: \(body.prefix(200))"])
         }
-        if let usage = json["usage"] as? [String: Any] {  // token 用量（cost 自己算，API 不給）
-            let p = usage["prompt_tokens"] as? Int ?? 0, comp = usage["completion_tokens"] as? Int ?? 0
-            metrics.recordLLMUsage(prompt: p, completion: comp)
-            Telemetry.polish.info("usage prompt=\(p, privacy: .public) completion=\(comp, privacy: .public)")
-        }
+        recordUsage(json)
         return content.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// API 回應 usage → metrics（prompt 含 cached，cached 在 prompt_tokens_details）。
+    private func recordUsage(_ json: [String: Any]) {
+        guard let usage = json["usage"] as? [String: Any] else { return }
+        let p = usage["prompt_tokens"] as? Int ?? 0
+        let cached = (usage["prompt_tokens_details"] as? [String: Any])?["cached_tokens"] as? Int ?? 0
+        let comp = usage["completion_tokens"] as? Int ?? 0
+        metrics.recordLLMUsage(prompt: p, cached: cached, completion: comp)
+        Telemetry.polish.info("usage prompt=\(p, privacy: .public) cached=\(cached, privacy: .public) completion=\(comp, privacy: .public)")
     }
 }

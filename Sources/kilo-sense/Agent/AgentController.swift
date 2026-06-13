@@ -88,6 +88,7 @@ final class AgentController {
         store.commitFinal(text, locale: locale, source: sources.current(), timeRange: timeRange,
                           pieces: pieces)
         metrics.recordSegment(chars: text.count)
+        if let timeRange { metrics.recordAudio(seconds: timeRange.duration.seconds) }  // 「每 10 分鐘花費」的分母
         polisher.nudge()
     }
 
@@ -330,6 +331,8 @@ final class AgentController {
                 case .message(let text):
                     got = true
                     store.appendReply(text)
+                case .usage(let p, let cached, let comp):
+                    metrics.recordLLMUsage(prompt: p, cached: cached, completion: comp)  // Kilo 問答也計量
                 }
             }
             return (got, nil)
