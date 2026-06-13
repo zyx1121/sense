@@ -315,10 +315,17 @@ struct TranscriptView: View {
             header.foregroundColor = .white.opacity(0.4)
             header.font = .system(size: sz(10.5), weight: .semibold)
             if let speaker = block.speaker {
+                // 講者（分人開啟）— cyan，對話者
                 var name = AttributedString("  " + speaker)
                 name.foregroundColor = .cyan.opacity(0.8)
                 name.font = .system(size: sz(10.5), weight: .semibold)
                 header += name
+            } else if let source = block.source {
+                // app 來源（分人關閉）— 灰，脈絡出處，截斷免吃滿一行
+                var src = AttributedString("  " + source.prefix(34))
+                src.foregroundColor = .white.opacity(0.5)
+                src.font = .system(size: sz(10.5), weight: .medium)
+                header += src
             }
             out += header + AttributedString("\n") + styled(block.text, 0.92)
         }

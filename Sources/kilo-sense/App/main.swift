@@ -21,6 +21,11 @@ func logErr(_ s: String) { FileHandle.standardError.write(Data((s + "\n").utf8))
 /// codex agent 的 workspace；reply 裡的相對路徑連結也解析到這底下。
 let kiloWorkdir = NSHomeDirectory() + "/.kilo"
 
+/// 講者分人（角色標籤）預設關閉 — 真實 podcast / 影片的即時分人品質不足
+/// （Sortformer 仍在 boundary 翻講者身分），Loki 裁決下線；逐字稿改純連續流
+/// （靜默 gap 分段 + 時間戳，無講者標頭）。`--diarize` 重開分人實驗。
+let diarizationEnabled = CommandLine.arguments.contains("--diarize")
+
 if CommandLine.arguments.contains("--locales") {
     await dumpLocales()
     exit(0)
@@ -59,7 +64,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 軟體區分，命名只走手動（/name、右鍵）→ enroll 聲紋後跨 session 認人。
 
         // 有聲紋庫 → 開機預熱 diarizer + re-enroll，第一句語音就認得人（否則跟首句賽跑會 miss）
-        if !VoiceStore.loadAll().isEmpty {
+        if diarizationEnabled, !VoiceStore.loadAll().isEmpty {
             let pump = SpeakerDiarizerPump(timeline: speakerTimeline)
             pump.warmUp()
             speakerPump = pump
@@ -184,8 +189,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     for t in transcribers { try await t.stream(buffer) }
                     let dur = Double(buffer.pcm.frameLength) / buffer.pcm.format.sampleRate
                     // speech gate：會議中恆開；其他時候近 30s 有 ASR 結果才餵（音樂/靜音不白燒推理）
-                    let gateOpen = meetingMode?.isOn == true
-                        || Date().timeIntervalSince(transcript.lastSpeechAt) < 30
+                    // 分人關閉時整條 gate 短路 — diarizer 完全不跑，不燒 CoreML 推理。
+                    let gateOpen = diarizationEnabled
+                        && (meetingMode?.isOn == true
+                            || Date().timeIntervalSince(transcript.lastSpeechAt) < 30)
                     if gateOpen {
                         let pump = speakerPump ?? SpeakerDiarizerPump(timeline: speakerTimeline)
                         speakerPump = pump

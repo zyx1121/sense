@@ -99,7 +99,7 @@ final class TranscriptStore {
     /// 顯示講者標頭（diarizer 標籤 / 會議模式的「我」）；前景 app fallback 不算講者、
     /// 不上標頭 — 那是歸檔的出處欄位，不是對話者。at = 開塊時間（標頭顯示時間戳用）；
     /// range = 音訊時間範圍 — 早期（diarizer 還沒看到第二個講者）沒標到的塊靠它回溯補標。
-    private(set) var polishedBlocks: [(speaker: String?, text: String, at: Date, range: CMTimeRange?)] = []
+    private(set) var polishedBlocks: [(speaker: String?, source: String?, text: String, at: Date, range: CMTimeRange?)] = []
     /// 已整理全文（不含講者標頭）— codex context、polisher 前文參考、長度計算用。
     var polished: String { polishedBlocks.map(\.text).joined(separator: "\n\n") }
     private(set) var pending: [PendingSegment] = []
@@ -354,19 +354,25 @@ final class TranscriptStore {
         let c = breakLines(trimOverlap(cleaned.trimmingCharacters(in: .whitespacesAndNewlines)))
         guard !c.isEmpty else { return nil }
         if let epoch, epoch != transcriptEpoch { return c }  // 清除後才回來的批：歸檔照走、畫面不復活
-        let speaker = isSpeaker ? source : nil
+        let speaker = (diarizationEnabled && isSpeaker) ? source : nil
         let sentenceEnd = polishedBlocks.last?.text.last.map { "。！？.!?…".contains($0) } ?? false
         let langChanged = lastPolishedLocale != nil && lastPolishedLocale != locale
-        // 同講者判定：標籤字串相同，或正規化成同一個字母（「講者 B」→ 顯示名升級成
-        //「伯恩」仍是同一人 — 續塊並把塊頭更新成最新名，不撕成兩塊）
-        let samePerson: Bool = {
+        // 同塊判定。分人關閉：純逐字稿，靜默 gap > 2.5s 才開新塊（時間戳沿停頓散佈，
+        // 無講者標頭）。分人開啟：標籤字串相同、或正規化成同一字母（「講者 B」→ 升級成
+        //「伯恩」仍是同一人 — 續塊並更新塊頭，不撕兩塊）。
+        let sameBlock: Bool = {
             guard let last = polishedBlocks.last else { return false }
+            if !diarizationEnabled {
+                if last.source != source { return false }  // app 來源切換 → 開新塊
+                guard let lr = last.range, let cur = timeRange else { return true }
+                return cur.start.seconds - lr.end.seconds <= 2.5
+            }
             if last.speaker == speaker { return true }
             guard let canon = speakerCanonicalizer,
                   let a = canon(last.speaker), let b = canon(speaker) else { return false }
             return a == b
         }()
-        if samePerson, let last = polishedBlocks.last {
+        if sameBlock, let last = polishedBlocks.last {
             polishedBlocks[polishedBlocks.count - 1].text =
                 (sentenceEnd || langChanged) ? last.text + "\n\n" + c : glue(last.text, c)
             polishedBlocks[polishedBlocks.count - 1].speaker = speaker ?? last.speaker
@@ -376,7 +382,7 @@ final class TranscriptStore {
                 } ?? timeRange
             }
         } else {
-            polishedBlocks.append((speaker, c, Date(), timeRange))  // 換講者開新塊
+            polishedBlocks.append((speaker, source, c, Date(), timeRange))  // 換講者/來源開新塊
         }
         // 回溯改名：同一個人的舊塊頭跟著升級成最新標籤（講者 B → 賴芳玉）—
         // 不然名字推出來之後，畫面上同一人頂著新舊兩種標看起來像三個人。

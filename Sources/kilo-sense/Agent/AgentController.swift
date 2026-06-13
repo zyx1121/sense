@@ -52,6 +52,9 @@ final class AgentController {
         self.polisher = polisher
         self.speakers = speakers
         self.isMeeting = isMeeting
+        // 分人關閉時不注入 resolver/canonicalizer — store 兩者維持 nil，
+        // 講者切段（splitAtSpeakerChange）、回溯改名/補標全部自動短路，逐字稿走純連續流。
+        guard diarizationEnabled else { return }
         // 同人判定：講者標籤正規化成字母 — 顯示名升級（講者 B → 伯恩）不撕塊
         store.speakerCanonicalizer = { [weak self] label in
             self?.speakers.canonicalLetter(for: label)
@@ -117,6 +120,10 @@ final class AgentController {
     /// /name <講者字母> <名字>：撈該講者近期聲音片段送 enroll。
     /// 樣本不足（<3s）pump 會記 log 跳過 — feed 提示寫明「樣本足夠即生效」。
     private func nameSpeaker(_ args: String) {
+        guard diarizationEnabled else {
+            store.appendError("講者分人已關閉 — 重開請以 --diarize 啟動")
+            return
+        }
         let usage = "用法：/name <講者字母> <名字>，例如 /name A 王小明"
         let parts = args.split(separator: " ", maxSplits: 1).map(String.init)
         guard parts.count == 2 else { store.appendError(usage); return }
