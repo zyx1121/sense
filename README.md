@@ -11,7 +11,7 @@
 
 > macOS sensory agent — hears what you're hearing, sees what you point at; transcribes, cleans up, analyzes, and remembers, in real time.
 
-`SpeechAnalyzer` · `ScreenCaptureKit` · `codex` · `gpt-5.4-mini` · `shake-to-capture`
+`SpeechAnalyzer` · `ScreenCaptureKit` · `codex` · `gpt-5.4-nano` · `shake-to-capture`
 
 **English** · [繁體中文](README.zh-TW.md)
 
@@ -37,7 +37,7 @@ flowchart TD
     asr["Live transcription<br/>SpeechAnalyzer · dual-language routing"]
     notch["Notch captions<br/>grey volatile → white final"]
     hub["📝 Transcript + context hub"]
-    polish["Transcript cleanup<br/>gpt-5.4-mini"]
+    polish["Transcript cleanup<br/>gpt-5.4-nano"]
     agent["Codex agent<br/>codex exec --json"]
     ui["Ask Kilo<br/>main window · feed · chips"]
     disk[("~/.kilo · local<br/>notes · transcripts · captures · training")]
@@ -72,7 +72,7 @@ flowchart TD
     router["⚖️ Language referee — LanguageRouter<br/>per-final confidence EMA + hysteresis, one path wins"]
     draft["Draft text (volatile — may still be rewritten)<br/>notch grey + window dim tail, display only"]
     queue["📥 Final-text queue (already on screen in grey)<br/>flush on: 60 chars · language switch · 4 s idle"]
-    polish["☁️ Cleanup — gpt-5.4-mini<br/>punctuation + mis-recognition fixes<br/>the only cloud hop; on failure raw passes through"]
+    polish["☁️ Cleanup — gpt-5.4-nano<br/>punctuation + mis-recognition fixes<br/>the only cloud hop; on failure raw passes through"]
     post["🔧 Deterministic post-processing<br/>paragraph breaks · seam stitching · echo dedup"]
     white["⚪ Polished transcript — white text"]
     archive[("~/.kilo/transcripts/<br/>YYYY-MM-DD.md")]
@@ -154,7 +154,7 @@ Requirements:
 - Permissions: **Screen Recording** (system audio + capture screenshots) and **Accessibility** (shake's element probing + click interception), prompted on first launch; **Microphone** (push-to-talk / meeting mode), prompted on first use
 - Speaker separation downloads its model from Hugging Face the first time speech is detected (cached locally afterwards)
 
-Transcript cleanup goes through `gpt-5.4-mini` over the API directly (no OpenAI key → raw text passes through unpolished).
+Transcript cleanup goes through `gpt-5.4-nano` over the API directly (no OpenAI key → raw text passes through unpolished).
 
 ```bash
 ./build/kilo-sense.app/Contents/MacOS/kilo-sense --langs zh-TW,en-US   # dual-path confidence routing (default)
@@ -169,7 +169,7 @@ kilo-sense is a sensory agent: it records system audio and screenshots what you 
 |---|---|
 | System audio | **On-device** SpeechAnalyzer transcription — audio never leaves your Mac |
 | Mic audio (push-to-talk / meeting mode) | **On-device** transcription — push-to-talk opens the mic only while the key is held; meeting mode records only while toggled on, and the transcript stays local |
-| Transcript | Sent to **OpenAI** `gpt-5.4-mini` for cleanup |
+| Transcript | Sent to **OpenAI** `gpt-5.4-nano` for cleanup |
 | Your instruction + recent transcript + selected screenshots | Sent to **codex / OpenAI** to generate a reply |
 | Notes / transcript archive | **Local** `~/.kilo`, never uploaded |
 | Voiceprints (auto speaker recognition) | **Local** `~/.kilo/voices/` — short audio samples of named speakers, enrolled on-device, never uploaded; delete the folder to forget everyone |

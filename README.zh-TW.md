@@ -11,7 +11,7 @@
 
 > macOS 感官 agent — 聽見你在聽的、看見你指的，即時轉錄、整理、分析、記錄。
 
-`SpeechAnalyzer` · `ScreenCaptureKit` · `codex` · `gpt-5.4-mini` · `shake-to-capture`
+`SpeechAnalyzer` · `ScreenCaptureKit` · `codex` · `gpt-5.4-nano` · `shake-to-capture`
 
 [English](README.md) · **繁體中文**
 
@@ -37,7 +37,7 @@ flowchart TD
     asr["即時轉錄<br/>SpeechAnalyzer · 雙語信心擇優"]
     notch["瀏海字幕<br/>灰字 volatile → 白字 final"]
     hub["📝 逐字稿 + 上下文中樞"]
-    polish["逐字稿潤稿<br/>gpt-5.4-mini"]
+    polish["逐字稿潤稿<br/>gpt-5.4-nano"]
     agent["Codex agent<br/>codex exec --json"]
     ui["問 Kilo<br/>主視窗 · feed · chips"]
     disk[("~/.kilo · 本機<br/>notes · transcripts · captures · training")]
@@ -72,7 +72,7 @@ flowchart TD
     router["⚖️ 語言裁判 — LanguageRouter<br/>逐筆定稿信心 EMA + 遲滯，只放行一路"]
     draft["草稿字（volatile — 還會被改寫）<br/>瀏海灰字 + 視窗淡灰尾，只顯示不落地"]
     queue["📥 定稿佇列（中灰，這時已看得到字）<br/>出隊：攢滿 60 字 · 語言切換 · 停話 4 秒"]
-    polish["☁️ 清稿 — gpt-5.4-mini<br/>補標點 + 修辨識錯字<br/>全程唯一上雲的一步；失敗原文照用"]
+    polish["☁️ 清稿 — gpt-5.4-nano<br/>補標點 + 修辨識錯字<br/>全程唯一上雲的一步；失敗原文照用"]
     post["🔧 確定性後處理<br/>分段 · 接縫接合 · 防抄去重"]
     white["⚪ 整理完的逐字稿 — 白字"]
     archive[("~/.kilo/transcripts/<br/>YYYY-MM-DD.md")]
@@ -154,7 +154,7 @@ make publish   # make release + 傳上 GitHub Release（簽名私鑰不出本機
 - 權限：**螢幕錄製**（系統音訊 + 圈選截圖）、**輔助使用**（shake 的元素探測與點擊攔截），首次啟動會提示；**麥克風**（按住說話 / 會議模式），首次使用時提示
 - 首次偵測到語音時會從 Hugging Face 下載分人 model（之後走本機快取）
 
-逐字稿整理走 `gpt-5.4-mini` 直打 API（沒 OpenAI key → 原文直出，不整理）。
+逐字稿整理走 `gpt-5.4-nano` 直打 API（沒 OpenAI key → 原文直出，不整理）。
 
 ```bash
 ./build/kilo-sense.app/Contents/MacOS/kilo-sense --langs zh-TW,en-US   # 雙路信心擇優（預設）
@@ -169,7 +169,7 @@ kilo-sense 是感官 agent，會錄系統音訊、截你圈選的畫面。資料
 |---|---|
 | 系統音訊 | **本機** SpeechAnalyzer 即時轉錄，音訊不離開你的 Mac |
 | 麥克風（按住說話 / 會議模式） | **本機**轉錄 — 按住說話只在按住時開 mic；會議模式只在開關打開時錄，逐字稿留在本機 |
-| 逐字稿 | 送 **OpenAI** `gpt-5.4-mini` 整理潤稿 |
+| 逐字稿 | 送 **OpenAI** `gpt-5.4-nano` 整理潤稿 |
 | 你的指令 + 最近逐字稿 + 圈選截圖 | 送 **codex / OpenAI** 產生回應 |
 | 筆記 / 逐字稿存檔 | **本機** `~/.kilo`，不上傳 |
 | 聲紋（自動認人） | **本機** `~/.kilo/voices/` — 已命名講者的短音訊樣本，本機註冊、從不上傳；刪掉資料夾即全部遺忘 |
