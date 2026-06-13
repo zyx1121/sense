@@ -24,7 +24,6 @@ Leave kilo-sense running while you watch a video, sit in a meeting, take a class
 - **Continuous transcript** — a draggable overlay accumulates the full text; a small model cleans the raw stream in the background (punctuation, mis-recognition fixes, paragraph breaks) — the grey tail keeps flowing in and is replaced by polished white text seconds later. Each section is headed by its timestamp and the source app it came from (`Safari: <video title>`, etc.); a new section starts on a silence gap or a source change
 - **Ask Kilo** — the input field talks straight to a codex agent (carrying the recent transcript + session memory); tool-use steps surface live, replies stream typewriter-style; tell it to take a note and it writes into `~/.kilo/`, and paths in its replies open on click
 - **Push-to-talk** — hold **right ⇧** and speak; your words type into the input field live (transcribed on-device), release to edit, Enter to send. The mic is only open while the key is held
-- **Speaker separation** _(off by default — `--diarize` to enable)_ — real-time diarization quality on real podcasts/videos isn't good enough yet (the streaming diarizer still flips speaker identities around turn boundaries), so it's disabled and the transcript runs as a plain continuous stream with timestamp + source headers. When enabled with `--diarize`: an on-device diarizer (FluidAudio NVIDIA Streaming Sortformer; `--diarizer ls-eend` for >4-speaker content) tells voices apart, multi-speaker content gets per-speaker blocks (**講者 A / B**, **對方 A / B** in meetings), naming is manual (**`/name A 王小明`** or right-click → 命名講者 A) and enrolls a verified voiceprint to `~/.kilo/voices/` for automatic cross-session recognition
 - **Meeting mode** — system loopback never contains your own voice, so in a call the transcript would miss your side; toggle this from the menu bar and the mic records continuously, your speech landing in the transcript labeled **我** while system audio stays the other side
 - **Shake to capture** — wiggle the cursor to enter selection mode: the screen dims, the UI element under the cursor lights up, left-click collects it (text as text, anything else as a screenshot), right-click ends. Captures become chips above the input field, handed to codex on the next turn
 
@@ -97,33 +96,6 @@ Apple's recognizer emits each utterance twice: first as **volatile** drafts that
 
 Why batch instead of cleaning every final? Micro-batching (size-or-idle, the same shape as Kafka's `batch.size` + `linger.ms`) buys three things: more context per chunk (typo fixes need surrounding words), fewer batch seams (every seam needs stitching and dedup guards), and fewer API round-trips. It costs almost nothing perceptually — raw finals are already readable the moment they land; cleanup just upgrades them from grey to white a few seconds later. The LLM only does what is genuinely uncertain (punctuation, mis-recognitions); everything that can be deterministic (paragraph breaks, stitching, dedup) is plain code.
 
-## Speaker pipeline
-
-```mermaid
-flowchart TD
-    audio["🔊 System audio — the same 16 kHz stream the ASR eats"]
-    gate["Speech gate<br/>ASR activity opens · 30 s silence closes · a 5 s ring back-fills the lead-in"]
-    diar["🧭 LS-EEND diarizer — on-device, 43 MB<br/>pre-warmed at launch when voiceprints exist"]
-    tl["Speaker timeline<br/>finalized + tentative segments, aligned to the ASR clock"]
-    label["Labels resolve when the polisher reads a batch<br/>講者 / 對方 A·B — single-narrator content keeps the app · title source"]
-    llm["☁️ Attribution — gpt-5.4-mini, structured output<br/>roles + names · vocative logic · evidence-gated<br/>every 60 s; slows to 10 min once everyone is named"]
-    enroll["Voiceprint enroll<br/>name stable two rounds in a row → enrollSpeaker<br/>audio clipped from a 120 s rolling ring"]
-    voices[("~/.kilo/voices/*.f32<br/>raw 16 kHz audio — survives model upgrades")]
-
-    audio --> gate --> diar --> tl --> label
-    label -->|recent turns| llm -->|"stable ×2"| enroll --> voices
-    voices -. "re-enrolled at launch → known voices recognized acoustically, no LLM" .-> diar
-
-    classDef device fill:#e6f4ea,stroke:#34a853,color:#0b3d20;
-    classDef cloud fill:#e8f0fe,stroke:#4285f4,color:#0b2a5b;
-    classDef store fill:#fef7e0,stroke:#f9ab00,color:#5b4300;
-    class audio,gate,diar,tl,label,enroll device;
-    class llm cloud;
-    class voices store;
-```
-
-Three timing tricks keep this accurate and cheap. Labels resolve at polish-read time, not at commit — by then the diarizer's **tentative segments** already cover even long utterances that kick the polisher immediately. The LLM pass encodes **vocative logic** (a name you say is almost always the *other* person's; only self-introductions bind to the speaker) and accepts a name only with a verifiable transcript quote — and because a wrong voiceprint would not self-heal the way display names do, enrollment additionally requires the **same binding two rounds in a row**. Once everyone on screen is named, attribution throttles from once a minute to once every ten — known voices are recognized acoustically and the LLM has nothing left to do. Delete `~/.kilo/voices/` to forget everyone.
-
 ## Running it (no Xcode)
 
 ```bash
@@ -152,7 +124,6 @@ Requirements:
 - **codex CLI** on PATH (the agent engine; loaded via `zsh -lc`, works through an fnm shim)
 - **OpenAI key** in the Keychain (`service=kilo account=openai`) — used by the agent and transcript cleanup; without it, captions and the transcript still work, the agent is disabled
 - Permissions: **Screen Recording** (system audio + capture screenshots) and **Accessibility** (shake's element probing + click interception), prompted on first launch; **Microphone** (push-to-talk / meeting mode), prompted on first use
-- Speaker separation downloads its model from Hugging Face the first time speech is detected (cached locally afterwards)
 
 Transcript cleanup goes through `gpt-5.4-nano` over the API directly (no OpenAI key → raw text passes through unpolished).
 
@@ -172,7 +143,6 @@ kilo-sense is a sensory agent: it records system audio and screenshots what you 
 | Transcript | Sent to **OpenAI** `gpt-5.4-nano` for cleanup |
 | Your instruction + recent transcript + selected screenshots | Sent to **codex / OpenAI** to generate a reply |
 | Notes / transcript archive | **Local** `~/.kilo`, never uploaded |
-| Voiceprints (auto speaker recognition) | **Local** `~/.kilo/voices/` — short audio samples of named speakers, enrolled on-device, never uploaded; delete the folder to forget everyone |
 
 **The key and codex are your own** — kilo-sense uses the OpenAI key in your Keychain and the codex CLI on your PATH; it bundles neither, manages neither, and routes nothing through the author's servers. What gets sent to OpenAI is decided by how you use it; kilo-sense just wires it up. Transcripts and notes live only in your local `~/.kilo`.
 

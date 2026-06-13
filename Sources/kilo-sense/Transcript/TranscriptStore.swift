@@ -81,21 +81,18 @@ func glue(_ a: String, _ b: String) -> String {
 }
 
 /// 待整理的一段定稿 — 帶語言標籤（polisher 按語言分批整理，指令語言跟著走才不會被翻譯）、
-/// 來源（前景 app / 視窗標題，歸檔時標出處）與音訊時間範圍（講者標籤延後解析用）。
+/// 來源（前景 app / 視窗標題，歸檔時標出處）與音訊時間範圍（算時長）。
 struct PendingSegment {
     let locale: String   // bcp47，如 "zh-TW"
     let text: String
-    let source: String?  // fallback 來源（前景 app）；講者標籤在讀取時才解析
+    let source: String?  // 來源（前景 app / 視窗標題）；會議 mic 標「我」
     var timeRange: CMTimeRange? = nil
-    /// word 級時間切片 — 一筆 final 可能橫跨講者換人點，取批前靠這個在邊界切段。
-    var pieces: [(text: String, range: CMTimeRange)] = []
 }
 
 /// overlay 上一個整理完的段塊 + 顯示用 metadata。塊頭 = 時間戳 + [音訊來源圖示]
-/// + [語言] + (講者 / app 來源) + 字數·時長。
+/// + [語言] + 來源 + 字數·時長。
 struct PolishedBlock: Identifiable {
     let id = UUID()           // 翻譯背景回填用
-    var speaker: String?      // 講者名（分人開啟時），分人關閉恆 nil
     var source: String?       // app 來源（前景 app · 視窗標題）或會議 mic 的「我」
     let locale: String        // bcp47 — 標 [中]/[EN]
     var text: String          // 整理後文字（同塊續批會 append）
@@ -114,10 +111,8 @@ struct PolishedBlock: Identifiable {
 /// 逐字稿三層：polished（小模型整理過）→ pending（定稿待整理，帶 locale）→ volatile（辨識中，打字機推進）。
 @MainActor @Observable
 final class TranscriptStore {
-    /// 整理完的段塊：同講者的連續整理批合成一塊。speaker 非 nil 時 overlay 在塊頭
-    /// 顯示講者標頭（diarizer 標籤 / 會議模式的「我」）；前景 app fallback 不算講者、
-    /// 不上標頭 — 那是歸檔的出處欄位，不是對話者。at = 開塊時間（標頭顯示時間戳用）；
-    /// range = 音訊時間範圍 — 早期（diarizer 還沒看到第二個講者）沒標到的塊靠它回溯補標。
+    /// 整理完的段塊：同來源的連續整理批合成一塊。at = 開塊時間（標頭顯示時間戳用）；
+    /// range = 音訊時間範圍（算時長）。
     private(set) var polishedBlocks: [PolishedBlock] = []
     /// 已整理全文（不含講者標頭）— codex context、polisher 前文參考、長度計算用。
     var polished: String { polishedBlocks.map(\.text).joined(separator: "\n\n") }
@@ -143,24 +138,6 @@ final class TranscriptStore {
     /// PTT 放開後的尾段窗（遲到 final 還算 PTT 的）— 會議模式靠這個避開「對 Kilo 說的話進會議記錄」。
     var pttTailUntil = Date.distantPast
 
-    /// 系統音訊最近一次 ASR 結果（volatile 也算）— 分人的 speech gate 用：有語音才餵 diarizer。
-    var lastSpeechAt = Date.distantPast
-
-    /// 講者標籤 → 字母正規化（AgentController 注入）—「講者 B」與後來升級的顯示名
-    ///（「伯恩」）是同一個人，塊接合靠這個判同，名字升級才不會把同一個人撕成兩塊。
-    var speakerCanonicalizer: ((String?) -> String?)?
-
-    /// 講者標籤解析器（AgentController 注入）。在 firstPendingRun 讀取時才呼叫 —
-    /// diarizer 收斂比 ASR final 慢 ~0.3-10s，commit 當下查常落空；
-    /// polisher 取批至少在 4s idle / 湊字之後，那時 segment 已就位。
-    var speakerResolver: ((CMTimeRange) -> String?)?
-
-    /// 近期整理完的輪替（講者標籤 + 內容 + 音訊範圍）— AttributionEnricher 的原料。
-    /// range 讓 enricher 讀取時能「重新解析」講者 — commit 當下的標籤在換手點常是錯的
-    ///（diarizer 還沒收斂），讀時用收斂後的時間軸重查一次。
-    private(set) var recentTurns: [(source: String?, text: String, range: CMTimeRange?)] = []
-    private(set) var turnsVersion = 0
-
     /// 畫面世代 — 「清除逐字稿」遞增；清除瞬間還在飛的 polish 批帶著舊世代回來，
     /// 只進歸檔不再上畫面（不擋歸檔，擋復活）。
     private(set) var transcriptEpoch = 0
@@ -170,7 +147,6 @@ final class TranscriptStore {
         volatileTask?.cancel(); volatileTask = nil
         polishedBlocks = []; pending = []; volatileTarget = ""; volatileShown = ""
         lastPolishedLocale = nil
-        recentTurns = []
         transcriptEpoch += 1
         touchOverlay()
     }
@@ -222,39 +198,34 @@ final class TranscriptStore {
     }
 
     func commitFinal(_ text: String, locale: String, source: String? = nil,
-                     timeRange: CMTimeRange? = nil,
-                     pieces: [(text: String, range: CMTimeRange)] = []) {
+                     timeRange: CMTimeRange? = nil) {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         volatileTask?.cancel(); volatileTask = nil
         volatileTarget = ""; volatileShown = ""
         guard !t.isEmpty else { return }
         pending.append(PendingSegment(locale: locale, text: t, source: source,
-                                      timeRange: timeRange,
-                                      pieces: pieces))  // 一筆 final 一段，不合併 — polisher 按段消耗才不會吃到飛中的新字
+                                      timeRange: timeRange))  // 一筆 final 一段，不合併
         while pendingRaw.count > 12000, !pending.isEmpty { pending.removeFirst() }  // 無 polisher 時的安全閥
     }
 
     /// pending 開頭「同語言、同來源的連續段」— polisher 的一個整理批次。
     /// 來源也斷批：會議模式我（mic）/ 對方（系統音）交錯時，批次混源會讓歸檔的
     /// 出處標頭張冠李戴。boundary = 後面接著別的語言或來源（提示 polisher 別等湊字數、快點沖掉）。
-    /// 來源在這裡（讀取時）才解析講者標籤 — 見 speakerResolver 註解。
     /// dropIncompleteTail：滿字數觸發（人還在講）的批次扣住最後一段 final 留給下一批 —
     /// 批尾可能是講到一半的句子，模型不知道後面還有字會補錯標點、接縫斷錯段。
     /// 不靠句末標點判斷完整性 — ASR finalize 截斷時也可能帶標點，不可信。
     /// 換人邊界（切點本來就乾淨）與 idle（人停了）觸發的批不扣；至少留一段成批。
     func firstPendingRun(dropIncompleteTail: Bool = false)
         -> (locale: String, text: String, segments: Int, boundary: Bool,
-            source: String?, isSpeaker: Bool, timeRange: CMTimeRange?)? {
+            source: String?, timeRange: CMTimeRange?)? {
         guard !pending.isEmpty else { return nil }
-        splitAtSpeakerChange(0)
         let first = pending[0]
-        let firstSource = resolvedSource(first)
+        let firstSource = first.source
         var count = 1
         var boundary = false
         while count < pending.count {
-            splitAtSpeakerChange(count)
             let seg = pending[count]
-            if seg.locale != first.locale || resolvedSource(seg).label != firstSource.label {
+            if seg.locale != first.locale || seg.source != firstSource {
                 boundary = true
                 break
             }
@@ -263,7 +234,7 @@ final class TranscriptStore {
         var n = count
         if dropIncompleteTail, !boundary, n >= 2 { n -= 1 }
         var text = first.text
-        // 批次的音訊時間範圍（消耗段的聯集）— 上稿的塊帶著它，之後才能回溯補講者標
+        // 批次的音訊時間範圍（消耗段的聯集）— 上稿的塊帶著它，用來算時長
         var range = first.timeRange
         for i in 1..<n {
             text = glue(text, pending[i].text)
@@ -271,88 +242,7 @@ final class TranscriptStore {
                 range = range.map { CMTimeRange(start: min($0.start, r.start), end: max($0.end, r.end)) } ?? r
             }
         }
-        return (first.locale, text, n, boundary, firstSource.label, firstSource.isSpeaker, range)
-    }
-
-    /// 一筆 ASR final 可能橫跨講者換人點（沒長停頓時 final 很長）— 整段 dominantLabel
-    /// 擇多會把前一講者的尾巴掛給講比較多的下一位。取批前把跨講者的段物理切開，
-    /// 前後各自成段、各自掛標。<1s 的講者群視為 diarizer 邊界抖動併回前群。
-    ///
-    /// 切點只允許落在句界：diarizer 邊界有 ±秒級誤差，word 級直切會把句子撕一半
-    ///（實測 podcast 切在「我先講一個小｜故事…」）。先把 word 片組回句子（句末標點
-    /// 或 >0.8s 靜默為界），每句整句歸給該句時間範圍的主講者 — 句子通常 ≥2s，
-    /// 秒級誤差傷不到（WhisperX 等 ASR×diarization pipeline 的標準做法）。
-    private func splitAtSpeakerChange(_ i: Int) {
-        guard let resolver = speakerResolver, i < pending.count else { return }
-        let seg = pending[i]
-        guard seg.pieces.count >= 2 else { return }
-
-        // 1. word 片 → 句子（句末標點收尾、或與下一片之間 >0.8s 靜默）
-        var sentences: [[(text: String, range: CMTimeRange)]] = []
-        var cur: [(text: String, range: CMTimeRange)] = []
-        for (j, p) in seg.pieces.enumerated() {
-            cur.append(p)
-            let t = p.text.trimmingCharacters(in: .whitespaces)
-            let sentenceEnd = t.last.map { "。！？.!?…".contains($0) } ?? false
-            let gap = j + 1 < seg.pieces.count
-                ? seg.pieces[j + 1].range.start.seconds - p.range.end.seconds
-                : 0
-            if sentenceEnd || gap > 0.8 {
-                sentences.append(cur); cur = []
-            }
-        }
-        if !cur.isEmpty { sentences.append(cur) }
-        guard sentences.count >= 2 else { return }
-
-        // 2. 句級多數決 → 按原始 label 分組（nil 先不吸收，後面分位置處理）
-        var groups: [(label: String?, pieces: [(text: String, range: CMTimeRange)])] = []
-        for s in sentences {
-            let range = CMTimeRange(start: s.first!.range.start, end: s.last!.range.end)
-            let label = resolver(range)
-            if let last = groups.last, last.label == label {
-                groups[groups.count - 1].pieces += s
-            } else {
-                groups.append((label, s))
-            }
-        }
-        // 開頭查無講者的片段（diarizer 還沒蓋到）併進下一群
-        if groups.count >= 2, groups[0].label == nil {
-            groups[1].pieces.insert(contentsOf: groups[0].pieces, at: 0)
-            groups.removeFirst()
-        }
-        // 中段 nil 與 <1s 短群（邊界抖動）併回前群；**結尾的 nil 群保持獨立** —
-        // 換手瞬間 diarizer 常來不及判定，那幾句多半是下一個講者的開場白，
-        // 掛給前一講者會吃掉對方的第一句（實戰：來賓的「博恩好，大家好」被掛給主持人）。
-        // 獨立成段留在 pending，下輪 nudge 時 diarizer 已收斂、自然歸對戶。
-        var merged: [(label: String?, pieces: [(text: String, range: CMTimeRange)])] = []
-        for (idx, g) in groups.enumerated() {
-            let trailingNil = g.label == nil && idx == groups.count - 1
-            let dur = g.pieces.last!.range.end.seconds - g.pieces.first!.range.start.seconds
-            if !merged.isEmpty, !trailingNil, g.label == nil || dur < 1.0 {
-                merged[merged.count - 1].pieces += g.pieces
-            } else {
-                merged.append(g)
-            }
-        }
-        guard merged.count >= 2 else { return }
-
-        Telemetry.asr.info("segment split at speaker change: \(merged.map { "\($0.label ?? "?")(\($0.pieces.count))" }.joined(separator: " | "), privacy: .public)")
-        pending.replaceSubrange(i...i, with: merged.map { g in
-            PendingSegment(
-                locale: seg.locale,
-                text: g.pieces.map(\.text).joined().trimmingCharacters(in: .whitespacesAndNewlines),
-                source: seg.source,
-                timeRange: CMTimeRange(start: g.pieces.first!.range.start, end: g.pieces.last!.range.end),
-                pieces: g.pieces)
-        })
-    }
-
-    /// 段落的有效來源：講者標籤（時間範圍查得到）優先，否則 fallback 收錄當下的前景 app。
-    /// isSpeaker 區分「對話者」與「出處」：diarizer 標籤與會議模式 mic 的「我」是講者
-    /// （overlay 顯示標頭），前景 app 名只進歸檔。
-    private func resolvedSource(_ seg: PendingSegment) -> (label: String?, isSpeaker: Bool) {
-        if let tr = seg.timeRange, let label = speakerResolver?(tr) { return (label, true) }
-        return (seg.source, seg.source == "我")
+        return (first.locale, text, n, boundary, firstSource, range)
     }
 
     private var lastPolishedLocale: String?
@@ -363,7 +253,7 @@ final class TranscriptStore {
     /// 同語言看句末標點（有 → 空行；無 → 斷句續接）。
     @discardableResult
     func commitPolished(_ cleaned: String, locale: String, consumedSegments: Int,
-                        source: String? = nil, isSpeaker: Bool = false, epoch: Int? = nil,
+                        source: String? = nil, epoch: Int? = nil,
                         timeRange: CMTimeRange? = nil) -> (text: String?, blockID: UUID?) {
         // 清除後才落地的批：它消耗的段已被 clearTranscript 清空，再 removeFirst 會吃掉
         // 清除後新進的段（沒整理沒歸檔直接蒸發）— 過期批不消耗
@@ -373,7 +263,6 @@ final class TranscriptStore {
         let c = breakLines(trimOverlap(cleaned.trimmingCharacters(in: .whitespacesAndNewlines)))
         guard !c.isEmpty else { return (nil, nil) }
         if let epoch, epoch != transcriptEpoch { return (c, nil) }  // 清除後才回來的批：歸檔照走、畫面不復活
-        let speaker = (diarizationEnabled && isSpeaker) ? source : nil
         let sentenceEnd = polishedBlocks.last?.text.last.map { "。！？.!?…".contains($0) } ?? false
         let langChanged = lastPolishedLocale != nil && lastPolishedLocale != locale
         // 同塊判定。分人關閉：純逐字稿，靜默 gap > 2.5s 才開新塊（時間戳沿停頓散佈，
@@ -381,21 +270,14 @@ final class TranscriptStore {
         //「伯恩」仍是同一人 — 續塊並更新塊頭，不撕兩塊）。
         let sameBlock: Bool = {
             guard let last = polishedBlocks.last else { return false }
-            if !diarizationEnabled {
-                if last.source != source { return false }  // app 來源切換 → 開新塊
-                if last.locale != locale { return false }  // 語言切換 → 開新塊（標記才對得上內容）
-                guard let lr = last.range, let cur = timeRange else { return true }
-                return cur.start.seconds - lr.end.seconds <= 2.5
-            }
-            if last.speaker == speaker { return true }
-            guard let canon = speakerCanonicalizer,
-                  let a = canon(last.speaker), let b = canon(speaker) else { return false }
-            return a == b
+            if last.source != source { return false }  // app 來源切換 → 開新塊
+            if last.locale != locale { return false }  // 語言切換 → 開新塊（標記才對得上內容）
+            guard let lr = last.range, let cur = timeRange else { return true }
+            return cur.start.seconds - lr.end.seconds <= 2.5
         }()
         if sameBlock, let last = polishedBlocks.last {
             polishedBlocks[polishedBlocks.count - 1].text =
                 (sentenceEnd || langChanged) ? last.text + "\n\n" + c : glue(last.text, c)
-            polishedBlocks[polishedBlocks.count - 1].speaker = speaker ?? last.speaker
             if let timeRange {  // 範圍聯集 — 回溯補標查的是整塊的時間跨度
                 polishedBlocks[polishedBlocks.count - 1].range = last.range.map {
                     CMTimeRange(start: min($0.start, timeRange.start), end: max($0.end, timeRange.end))
@@ -403,24 +285,7 @@ final class TranscriptStore {
             }
         } else {
             polishedBlocks.append(PolishedBlock(  // 換講者/來源/靜默開新塊
-                speaker: speaker, source: source, locale: locale, text: c, at: Date(), range: timeRange))
-        }
-        // 回溯改名：同一個人的舊塊頭跟著升級成最新標籤（講者 B → 賴芳玉）—
-        // 不然名字推出來之後，畫面上同一人頂著新舊兩種標看起來像三個人。
-        // 只動 overlay 顯示；歸檔維持 forward-only。
-        if let speaker, let canon = speakerCanonicalizer, let me = canon(speaker) {
-            for i in polishedBlocks.indices
-            where polishedBlocks[i].speaker != speaker && canon(polishedBlocks[i].speaker) == me {
-                polishedBlocks[i].speaker = speaker
-            }
-        }
-        // 回溯補標：diarizer 還沒看到第二個講者前 commit 的塊沒有標籤 — 塊上帶著
-        // 音訊範圍，之後每次 commit 回頭重查，認得出了就補上（首段也會長出講者）
-        if let resolver = speakerResolver {
-            for i in polishedBlocks.indices where polishedBlocks[i].speaker == nil {
-                guard let r = polishedBlocks[i].range, let label = resolver(r) else { continue }
-                polishedBlocks[i].speaker = label
-            }
+                source: source, locale: locale, text: c, at: Date(), range: timeRange))
         }
         lastPolishedLocale = locale
         // 記憶體安全閥：總量超標先丟最舊的塊，只剩一塊就裁它的頭
@@ -428,9 +293,6 @@ final class TranscriptStore {
         if polished.count > 12000 {
             polishedBlocks[0].text = String(polishedBlocks[0].text.suffix(9000))
         }
-        recentTurns.append((source, c, timeRange))  // 輪替史 — enricher 推角色/人名的原料
-        if recentTurns.count > 30 { recentTurns.removeFirst(recentTurns.count - 30) }
-        turnsVersion += 1
         return (c, polishedBlocks.last?.id)  // 上稿文字（給歸檔）+ 這批進的塊 id（給翻譯回填）
     }
 
@@ -549,13 +411,6 @@ final class TranscriptStore {
     }
 
     func setThinking(_ b: Bool) { thinking = b }
-
-    /// 清空輪替史 — 聲紋 enroll 後字母重排（resetAnonymous），舊輪替裡的「講者 A」
-    /// 字串指向重排前的另一個人，留著會餵壞 enricher 的一致性閘。
-    func clearRecentTurns() {
-        recentTurns = []
-        turnsVersion += 1
-    }
 
     /// 清空 Kilo 對話 feed（/clear、右鍵「清除對話」）— 步驟與打字機歸零；逐字稿與圈選素材不動。
     /// 還在飛的 turn 事件會落進清空後的 feed — 接受（那是新對話前最後的殘響）。

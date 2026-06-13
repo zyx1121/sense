@@ -21,13 +21,8 @@ func logErr(_ s: String) { FileHandle.standardError.write(Data((s + "\n").utf8))
 /// codex agent 的 workspace；reply 裡的相對路徑連結也解析到這底下。
 let kiloWorkdir = NSHomeDirectory() + "/.kilo"
 
-/// 講者分人（角色標籤）預設關閉 — 真實 podcast / 影片的即時分人品質不足
-/// （Sortformer 仍在 boundary 翻講者身分），Loki 裁決下線；逐字稿改純連續流
-/// （靜默 gap 分段 + 時間戳，無講者標頭）。`--diarize` 重開分人實驗。
-let diarizationEnabled = CommandLine.arguments.contains("--diarize")
-
 /// polish / translate 用的 OpenAI 模型 — 預設 gpt-5.4-nano（實測同 talk 比 mini 省 ~72%、
-/// 品質沒明顯退步）；`--polish-model gpt-5.4-mini` 可換回。codex 問答另用 mini（複雜任務）。
+/// 品質沒明顯退步）；`--polish-model gpt-5.4-mini` 可換回。codex 問答另用 gpt-5.4（複雜任務）。
 let polishModel: String = {
     let args = CommandLine.arguments
     if let i = args.firstIndex(of: "--polish-model"), args.indices.contains(i + 1) {
@@ -57,8 +52,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusBar: StatusBarController?
     private var pushToTalk: PushToTalk?
     private var meetingMode: MeetingMode?
-    private let speakerTimeline = SpeakerTimeline()
-    private var speakerPump: SpeakerDiarizerPump?
 
     func applicationDidFinishLaunching(_: Notification) {
         Task.detached { _ = CodexAgent.shellPath }  // 背景預熱 codex PATH 解析（GUI app 貧瘠環境用）
@@ -69,16 +62,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         startPipeline()
         startPushToTalk()
         setUpMeetingMode()
-        // LLM 自動命名（AttributionEnricher）已下線 — mini 在真實 podcast 的歸屬
-        // 不可靠（鏡像對調、被髒輪替標籤帶偏），Loki 裁決：未知講者統一 講者 A/B/C
-        // 軟體區分，命名只走手動（/name、右鍵）→ enroll 聲紋後跨 session 認人。
-
-        // 有聲紋庫 → 開機預熱 diarizer + re-enroll，第一句語音就認得人（否則跟首句賽跑會 miss）
-        if diarizationEnabled, !VoiceStore.loadAll().isEmpty {
-            let pump = SpeakerDiarizerPump(timeline: speakerTimeline)
-            pump.warmUp()
-            speakerPump = pump
-        }
     }
 
     /// 會議模式：選單列開關 → mic 持續錄（我這側），與系統音訊雙流分轉。
@@ -149,9 +132,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let polisher = TranscriptPolisher(store: transcript, archiver: TranscriptArchiver(), metrics: metrics)
         logErr("逐字稿整理模型：\(polisher.backendName)")
         let controller = AgentController(store: transcript, agent: agent, metrics: metrics,
-                                         polisher: polisher, speakers: speakerTimeline,
+                                         polisher: polisher,
                                          isMeeting: { [weak self] in self?.meetingMode?.isOn == true })
-        controller.pumpProvider = { [weak self] in self?.speakerPump }  // /name 聲紋註冊用
         self.agentController = controller
         let win = SummaryWindow(store: transcript, controller: controller)
         win.show()
@@ -189,38 +171,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 for t in transcribers { try await t.setUp() }
                 let audio = try await startAudioWithRetry()
                 logErr("就緒，聽取中…")
-                // streamSeconds = ASR 時間軸（audioTimeRange 的時鐘）— 分人對時用
-                var streamSeconds: Double = 0
-                var feeding = false
-                // 近 5 秒音訊環形暫存 — ASR 結果比語音本身晚 ~1s，gate 開啟瞬間回灌
-                // lead-in，分人才不會漏掉每段語音的開頭。
-                var ring: [(buf: PCMBuffer, at: Double, dur: Double)] = []
                 for await buffer in audio {
                     for t in transcribers { try await t.stream(buffer) }
-                    let dur = Double(buffer.pcm.frameLength) / buffer.pcm.format.sampleRate
-                    // speech gate：會議中恆開；其他時候近 30s 有 ASR 結果才餵（音樂/靜音不白燒推理）
-                    // 分人關閉時整條 gate 短路 — diarizer 完全不跑，不燒 CoreML 推理。
-                    let gateOpen = diarizationEnabled
-                        && (meetingMode?.isOn == true
-                            || Date().timeIntervalSince(transcript.lastSpeechAt) < 30)
-                    if gateOpen {
-                        let pump = speakerPump ?? SpeakerDiarizerPump(timeline: speakerTimeline)
-                        speakerPump = pump
-                        if !feeding {
-                            feeding = true
-                            for r in ring { pump.enqueue(r.buf, streamSeconds: r.at) }
-                            ring.removeAll()
-                        }
-                        pump.enqueue(buffer, streamSeconds: streamSeconds)
-                    } else {
-                        if feeding {
-                            feeding = false
-                            speakerPump?.pause()
-                        }
-                        ring.append((buffer, streamSeconds, dur))
-                        while ring.reduce(0, { $0 + $1.dur }) > 5 { ring.removeFirst() }
-                    }
-                    streamSeconds += dur
                 }
             } catch {
                 logErr("error: \(error)")

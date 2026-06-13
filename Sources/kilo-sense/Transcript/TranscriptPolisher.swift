@@ -98,13 +98,13 @@ final class TranscriptPolisher {
             var result: (text: String?, blockID: UUID?) = (nil, nil)
             do {
                 let cleaned = try await polish(chunk: run.text, locale: run.locale, contextTail: tail)
-                result = store.commitPolished(cleaned.isEmpty ? run.text : cleaned, locale: run.locale, consumedSegments: run.segments, source: run.source, isSpeaker: run.isSpeaker, epoch: epoch, timeRange: run.timeRange)
+                result = store.commitPolished(cleaned.isEmpty ? run.text : cleaned, locale: run.locale, consumedSegments: run.segments, source: run.source, epoch: epoch, timeRange: run.timeRange)
                 Telemetry.polish.info("polished [\(run.locale, privacy: .public)] \(run.text.count, privacy: .public) -> \(cleaned.count, privacy: .public) chars")
                 if !cleaned.isEmpty {
                     pairLogger.log(raw: run.text, cleaned: cleaned, locale: run.locale, contextTail: tail)
                 }
             } catch {
-                result = store.commitPolished(run.text, locale: run.locale, consumedSegments: run.segments, source: run.source, isSpeaker: run.isSpeaker, epoch: epoch, timeRange: run.timeRange)  // 原文轉正，不卡顯示
+                result = store.commitPolished(run.text, locale: run.locale, consumedSegments: run.segments, source: run.source, epoch: epoch, timeRange: run.timeRange)  // 原文轉正，不卡顯示
                 Telemetry.polish.error("polish failed: \(error.localizedDescription, privacy: .public)")
             }
             if let text = result.text { archiver.append(text, source: run.source) }  // 持久化（整理後的定稿）

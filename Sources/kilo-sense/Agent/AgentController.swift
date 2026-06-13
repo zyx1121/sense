@@ -32,47 +32,22 @@ final class AgentController {
     private let agent: CodexAgent?
     private let metrics: MetricsStore
     private let polisher: TranscriptPolisher
-    private let speakers: SpeakerTimeline
     private let isMeeting: () -> Bool
     private let sources = SourceTracker()
     private let screenCapturer = Capturer()
-    /// /name 自定義命名要把聲紋送進 pump enroll（pump 延遲建立，用 provider 拿）。
-    var pumpProvider: (() -> SpeakerDiarizerPump?)?
     private var threadID: String?  // codex session，app 重啟歸零
     /// 對話世代 — /clear 遞增；飛行中 turn 的 .thread event 帶舊世代回來時
     /// 不寫回 threadID（否則 submit 後 0.5-2s 內 /clear 會被默默復活 session）。
     private var convEpoch = 0
 
     init(store: TranscriptStore, agent: CodexAgent?, metrics: MetricsStore,
-         polisher: TranscriptPolisher, speakers: SpeakerTimeline,
+         polisher: TranscriptPolisher,
          isMeeting: @escaping () -> Bool = { false }) {
         self.store = store
         self.agent = agent
         self.metrics = metrics
         self.polisher = polisher
-        self.speakers = speakers
         self.isMeeting = isMeeting
-        // 分人關閉時不注入 resolver/canonicalizer — store 兩者維持 nil，
-        // 講者切段（splitAtSpeakerChange）、回溯改名/補標全部自動短路，逐字稿走純連續流。
-        guard diarizationEnabled else { return }
-        // 同人判定：講者標籤正規化成字母 — 顯示名升級（講者 B → 伯恩）不撕塊
-        store.speakerCanonicalizer = { [weak self] label in
-            self?.speakers.canonicalLetter(for: label)
-        }
-        // 講者標籤延後到 polisher 取批時解析（diarizer 收斂比 final 慢，commit 當下查常落空）
-        store.speakerResolver = { [weak self] range in
-            guard let self else { return nil }
-            let meeting = self.isMeeting()
-            return self.speakers.dominantLabel(
-                start: range.start.seconds, end: range.end.seconds,
-                prefix: meeting ? "對方" : "講者",
-                requireMultipleSpeakers: !meeting)
-        }
-    }
-
-    /// 系統音訊有 ASR 結果（含 volatile）— 分人 speech gate 的訊號源。
-    func noteSpeech() {
-        store.lastSpeechAt = Date()
     }
 
     /// 辨識中的 volatile → overlay 灰字尾巴（打字機）。
@@ -81,12 +56,10 @@ final class AgentController {
     }
 
     /// 每段定稿進逐字稿（顯示 + codex context），並戳 polisher 整理。
-    /// 帶 timeRange 進 pending — 講者標籤在 polisher 取批時才解析（speakerResolver），
-    /// 這裡只記 fallback 來源（前景 app）。locale 跟著進 pending（整理選對指令語言）。
-    func appendFinal(_ text: String, locale: String, timeRange: CMTimeRange? = nil,
-                     pieces: [(text: String, range: CMTimeRange)] = []) {
-        store.commitFinal(text, locale: locale, source: sources.current(), timeRange: timeRange,
-                          pieces: pieces)
+    /// 帶 timeRange 進 pending（記音訊時長 → 花費分母）、fallback 來源（前景 app）；
+    /// locale 跟著進 pending（整理選對指令語言）。
+    func appendFinal(_ text: String, locale: String, timeRange: CMTimeRange? = nil) {
+        store.commitFinal(text, locale: locale, source: sources.current(), timeRange: timeRange)
         metrics.recordSegment(chars: text.count)
         if let timeRange { metrics.recordAudio(seconds: timeRange.duration.seconds) }  // 「每 10 分鐘花費」的分母
         polisher.nudge()
@@ -107,52 +80,10 @@ final class AgentController {
             clearConversation()
             return
         }
-        // /name A 王小明 — 使用者直接命名匿名講者並註冊聲紋。user 確認是最高權威，
-        // 不走 enricher 的兩輪一致閘；之後跨 session 純聲學認人。
-        if instruction.lowercased().hasPrefix("/name") {
-            nameSpeaker(String(instruction.dropFirst(5)).trimmingCharacters(in: .whitespaces))
-            return
-        }
         let attachments = store.attachments
         store.clearAttachments()
         run(instruction: instruction, attachments: attachments, label: instruction)
     }
-
-    /// /name <講者字母> <名字>：撈該講者近期聲音片段送 enroll。
-    /// 樣本不足（<3s）pump 會記 log 跳過 — feed 提示寫明「樣本足夠即生效」。
-    private func nameSpeaker(_ args: String) {
-        guard diarizationEnabled else {
-            store.appendError("講者分人已關閉 — 重開請以 --diarize 啟動")
-            return
-        }
-        let usage = "用法：/name <講者字母> <名字>，例如 /name A 王小明"
-        let parts = args.split(separator: " ", maxSplits: 1).map(String.init)
-        guard parts.count == 2 else { store.appendError(usage); return }
-        let letter = parts[0].replacingOccurrences(of: "講者", with: "")
-            .replacingOccurrences(of: "對方", with: "")
-            .trimmingCharacters(in: .whitespaces).uppercased()
-        let name = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
-        guard letter.count == 1, ("A"..."Z").contains(letter), !name.isEmpty else {
-            store.appendError(usage); return
-        }
-        let ranges = speakers.segmentRanges(forLetter: letter)
-        guard !ranges.isEmpty else {
-            store.appendError("找不到講者 \(letter) 的聲音片段 — 畫面上要先出現過「講者 \(letter)」")
-            return
-        }
-        guard let pump = pumpProvider?() else {
-            store.appendError("分人引擎還沒啟動（要先有語音在播）")
-            return
-        }
-        pump.requestEnroll(name: name, ranges: ranges)
-        store.upsertStep(id: "name-\(letter)-\(name)",
-                         title: "講者 \(letter) → \(name)（聲紋註冊中，樣本足夠即生效）",
-                         running: false, failed: false)
-        store.touchOverlay()
-    }
-
-    /// 畫面上活躍的匿名講者字母（右鍵「命名講者 X…」選單用）。
-    func anonymousLetters() -> [String] { speakers.anonymousLetters }
 
     /// 重開對話：清 feed + 畫面逐字稿、丟 codex session — 下一輪 fresh session
     ///（歸檔的逐字稿不動，圈選素材保留）。
