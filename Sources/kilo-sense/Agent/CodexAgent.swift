@@ -8,7 +8,7 @@ enum CodexEvent: Sendable {
     case usage(prompt: Int, cached: Int, completion: Int)              // turn.completed 的 token 用量
 }
 
-/// codex exec 當 agent engine：workspace-write 圈在 workdir、小 model + minimal reasoning 求快。
+/// codex exec 當 agent engine：workspace-write 圈在 workdir、minimal reasoning 求快。
 /// - 用 `/bin/zsh -lc` 跑：codex 在 fnm shim，GUI subprocess 的 PATH 看不到，login shell 才載得到。
 /// - 帶 CODEX_API_KEY（從 Keychain）：避開 ChatGPT 登入的 rate-limit。
 /// - prompt（指令 + 逐字稿）整包走 env，不拼進命令字串避免 injection。
@@ -19,7 +19,7 @@ enum CodexEvent: Sendable {
 struct CodexAgent: Sendable {
     let workdir: String
     let apiKey: String?
-    var model = "gpt-5.4-mini"
+    var model = "gpt-5.4"
 
     /// GUI app 從 Finder/launchd 啟動是貧瘠環境：`zsh -lc`（login 非 interactive）不載 ~/.zshrc，
     /// 撈不到 fnm / codex 的 PATH → `command not found: codex`。啟動撈一次 interactive login shell 的
