@@ -91,6 +91,23 @@ struct PendingSegment {
     var pieces: [(text: String, range: CMTimeRange)] = []
 }
 
+/// overlay 上一個整理完的段塊 + 顯示用 metadata。塊頭 = 時間戳 + [音訊來源圖示]
+/// + [語言] + (講者 / app 來源) + 字數·時長。
+struct PolishedBlock {
+    var speaker: String?      // 講者名（分人開啟時），分人關閉恆 nil
+    var source: String?       // app 來源（前景 app · 視窗標題）或會議 mic 的「我」
+    let locale: String        // bcp47 — 標 [中]/[EN]
+    var text: String          // 整理後文字（同塊續批會 append）
+    let at: Date              // 開塊時間（標頭時間戳）
+    var range: CMTimeRange?   // 音訊時間範圍（聯集；算時長 + 回溯補標）
+
+    /// mic（會議我這側）vs 系統音訊 — 來源標「我」即 mic。
+    var isMic: Bool { source == "我" }
+    var charCount: Int { text.count }
+    /// 音訊時長秒數（無 range → nil）。
+    var durationSeconds: Double? { range.map { $0.duration.seconds } }
+}
+
 /// 逐字稿連續文件流 + Kilo agent 步驟 feed。window 顯示、codex agent 讀來思考。
 /// 逐字稿三層：polished（小模型整理過）→ pending（定稿待整理，帶 locale）→ volatile（辨識中，打字機推進）。
 @MainActor @Observable
@@ -99,7 +116,7 @@ final class TranscriptStore {
     /// 顯示講者標頭（diarizer 標籤 / 會議模式的「我」）；前景 app fallback 不算講者、
     /// 不上標頭 — 那是歸檔的出處欄位，不是對話者。at = 開塊時間（標頭顯示時間戳用）；
     /// range = 音訊時間範圍 — 早期（diarizer 還沒看到第二個講者）沒標到的塊靠它回溯補標。
-    private(set) var polishedBlocks: [(speaker: String?, source: String?, text: String, at: Date, range: CMTimeRange?)] = []
+    private(set) var polishedBlocks: [PolishedBlock] = []
     /// 已整理全文（不含講者標頭）— codex context、polisher 前文參考、長度計算用。
     var polished: String { polishedBlocks.map(\.text).joined(separator: "\n\n") }
     private(set) var pending: [PendingSegment] = []
@@ -364,6 +381,7 @@ final class TranscriptStore {
             guard let last = polishedBlocks.last else { return false }
             if !diarizationEnabled {
                 if last.source != source { return false }  // app 來源切換 → 開新塊
+                if last.locale != locale { return false }  // 語言切換 → 開新塊（標記才對得上內容）
                 guard let lr = last.range, let cur = timeRange else { return true }
                 return cur.start.seconds - lr.end.seconds <= 2.5
             }
@@ -382,7 +400,8 @@ final class TranscriptStore {
                 } ?? timeRange
             }
         } else {
-            polishedBlocks.append((speaker, source, c, Date(), timeRange))  // 換講者/來源開新塊
+            polishedBlocks.append(PolishedBlock(  // 換講者/來源/靜默開新塊
+                speaker: speaker, source: source, locale: locale, text: c, at: Date(), range: timeRange))
         }
         // 回溯改名：同一個人的舊塊頭跟著升級成最新標籤（講者 B → 賴芳玉）—
         // 不然名字推出來之後，畫面上同一人頂著新舊兩種標看起來像三個人。

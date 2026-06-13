@@ -311,25 +311,34 @@ struct TranscriptView: View {
         var out = AttributedString()
         for (i, block) in store.polishedBlocks.enumerated() {
             if i > 0 { out += styled("\n\n", 0.92) }
-            var header = AttributedString(Self.blockTimeFormat.string(from: block.at))
-            header.foregroundColor = .white.opacity(0.4)
-            header.font = .system(size: sz(10.5), weight: .semibold)
-            if let speaker = block.speaker {
-                // 講者（分人開啟）— cyan，對話者
-                var name = AttributedString("  " + speaker)
-                name.foregroundColor = .cyan.opacity(0.8)
-                name.font = .system(size: sz(10.5), weight: .semibold)
-                header += name
-            } else if let source = block.source {
-                // app 來源（分人關閉）— 灰，脈絡出處，截斷免吃滿一行
-                var src = AttributedString("  " + source.prefix(34))
-                src.foregroundColor = .white.opacity(0.5)
-                src.font = .system(size: sz(10.5), weight: .medium)
-                header += src
-            }
-            out += header + AttributedString("\n") + styled(block.text, 0.92)
+            out += blockHeader(block) + AttributedString("\n") + styled(block.text, 0.92)
         }
         return out + styled(store.pendingRaw, 0.55) + styled(store.volatileShown, 0.38)
+    }
+
+    /// 塊頭：時間戳 ·音訊圖示· 語言 · (講者/來源) · 字數時長。淡灰 metadata，講者用 cyan。
+    private func blockHeader(_ block: PolishedBlock) -> AttributedString {
+        func part(_ s: String, _ color: Color, _ weight: Font.Weight = .semibold) -> AttributedString {
+            var a = AttributedString(s)
+            a.foregroundColor = color
+            a.font = .system(size: sz(10.5), weight: weight)
+            return a
+        }
+        let dim = Color.white.opacity(0.4)
+        // 時間戳 + 音訊來源圖示（🎤 我這側 / 🔊 系統）+ 語言
+        var header = part(Self.blockTimeFormat.string(from: block.at), dim)
+        header += part("  \(block.isMic ? "🎤" : "🔊") \(block.locale.hasPrefix("zh") ? "中" : "EN")", dim, .medium)
+        // 講者（cyan，分人開）或 app 來源（灰，分人關），擇一
+        if let speaker = block.speaker {
+            header += part("  " + speaker, .cyan.opacity(0.8))
+        } else if let source = block.source {
+            header += part("  " + source.prefix(28), .white.opacity(0.5), .medium)
+        }
+        // 字數 · 時長（回看掌握份量）
+        var tail = "  · \(block.charCount) 字"
+        if let dur = block.durationSeconds, dur >= 1 { tail += " · \(Int(dur))s" }
+        header += part(tail, .white.opacity(0.3), .regular)
+        return header
     }
 
     /// 一律 [固定寬 icon gutter][內容]：四種 step 的文字左緣對齊同一條線，icon 中心也對齊輸入框 sparkle。
