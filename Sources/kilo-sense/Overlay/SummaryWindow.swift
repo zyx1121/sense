@@ -157,7 +157,7 @@ struct TranscriptView: View {
                                     .filter { !$0.isEmpty }.joined(separator: "\n"))
                             }
                             Divider()
-                            Button("清除逐字稿（已存檔的不動）", role: .destructive) {
+                            Button("清除逐字稿", role: .destructive) {
                                 store.clearTranscript()
                             }
                         }

@@ -86,7 +86,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         add(menu, "匯出用量報告…", #selector(exportUsageReport))
         menu.addItem(.separator())
 
-        let meeting = add(menu, "會議模式（錄下我的發言）", #selector(toggleMeeting), key: "m")
+        let meeting = add(menu, "會議模式", #selector(toggleMeeting), key: "m")
         meeting.state = meetingOn ? .on : .off
 
         add(menu, "開啟逐字稿資料夾", #selector(openTranscripts))
@@ -95,7 +95,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         add(menu, "放大視窗", #selector(zoomIn), key: "=")
         add(menu, "縮小視窗", #selector(zoomOut), key: "-")
         add(menu, "重設視窗大小", #selector(zoomReset), key: "0")
-        add(menu, "清除對話與逐字稿（開新 session）", #selector(clearConversation))
+        add(menu, "清除對話與逐字稿", #selector(clearConversation))
         menu.addItem(.separator())
 
         let perm = NSMenuItem(title: "權限設定", action: nil, keyEquivalent: "")
@@ -110,8 +110,8 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         launch.state = SMAppService.mainApp.status == .enabled ? .on : .off
 
         menu.addItem(.separator())
-        add(menu, "重新啟動 Kilo", #selector(restart))
-        add(menu, "結束 Kilo", #selector(quit), key: "q")
+        add(menu, "重新啟動", #selector(restart))
+        add(menu, "結束", #selector(quit), key: "q")
         item.menu = menu
     }
 

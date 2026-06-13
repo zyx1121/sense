@@ -37,7 +37,7 @@ private func composeInstructions(locale: String, contextTail: String) -> String 
 
 /// 小模型即時整理逐字稿：pendingRaw 滿 60 字立刻整理、不滿則 4s idle 後整理；
 /// 一次一個 in-flight，失敗就原文轉正不卡流。沒 OpenAI key → 整理關閉（raw 留在 pendingRaw）。
-/// 整理走 gpt-5.4-mini 直打 API（不走 codex exec，省 22k token 的 agent prompt）。
+/// 整理直打 OpenAI API（不走 codex exec，省 22k token 的 agent prompt）。
 /// 不用 on-device FoundationModels：實測錯字修正明顯較差（只修指令例子教過的、英文偏保守），
 /// 且需 Apple Intelligence 啟用（Mac 與 Siri 同語言）— 純退步，移除。
 @MainActor
@@ -46,7 +46,7 @@ final class TranscriptPolisher {
     private let archiver: TranscriptArchiver
     private let metrics: MetricsStore
     private let apiKey: String?
-    private let model = polishModel  // 預設 gpt-5.4-mini；--polish-model 可換 nano 測
+    private let model = polishModel  // 預設 gpt-5.4-nano；--polish-model 可換
     private var running = false
     private var idleTask: Task<Void, Never>?
     private let pairLogger = PolishPairLogger()  // 語料本金：(raw → cleaned) 配對累積
@@ -66,15 +66,7 @@ final class TranscriptPolisher {
         guard apiKey != nil, !running else { return }
         guard let run = store.firstPendingRun() else { return }
         if run.boundary { kick(holdTail: false); return }  // 換人邊界：切點已定，直接送
-        if run.text.count >= 60 {
-            if run.segments >= 2 { kick(holdTail: true); return }  // 多段：扣尾段自帶收斂時間
-            // 單段巨型 final（連續對話沒停頓的典型形態）：滿字數但 diarizer 對最新
-            // 幾秒還沒收斂 — 立即取批會切錯/漏切且 commit 後不可重切。等 2s 讓
-            // 時間軸修訂完再切（灰字照常即時顯示，只是白字晚 2 秒）。等待期間若又
-            // 進了新 final，扣尾規則照常生效。
-            schedule(after: 2, holdTail: true)
-            return
-        }
+        if run.text.count >= 60 { kick(holdTail: true); return }  // 滿字數：扣尾段（批尾可能是半句）後送
         schedule(after: 4, holdTail: false)  // 不滿字數：idle 4s 後沖掉（人停了）
     }
 
@@ -120,7 +112,7 @@ final class TranscriptPolisher {
         }
     }
 
-    /// 外語段落 → 繁中譯文（gpt-5.4-mini，只給譯文）。token 計入 metrics。
+    /// 外語段落 → 繁中譯文（走 polish 模型，只給譯文）。token 計入 metrics。
     private func translate(_ text: String) async throws -> String {
         guard let apiKey else { return "" }
         var req = URLRequest(url: URL(string: "https://api.openai.com/v1/chat/completions")!)
@@ -146,7 +138,7 @@ final class TranscriptPolisher {
         return content.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// gpt-5.4-mini 直打 chat completions：system 放指令、user 只放 raw chunk。
+    /// 直打 chat completions：system 放指令、user 只放 raw chunk。
     private func polish(chunk: String, locale: String, contextTail: String) async throws -> String {
         guard let apiKey else { return chunk }
         var req = URLRequest(url: URL(string: "https://api.openai.com/v1/chat/completions")!)
