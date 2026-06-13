@@ -309,7 +309,11 @@ struct TranscriptView: View {
             return a
         }
         var out = AttributedString()
-        for (i, block) in store.polishedBlocks.enumerated() {
+        // 只渲染最近 N 塊：每次資料變動（含 volatile 高頻）都重建整段 AttributedString，
+        // 成本 O(塊數)。長內容塊數累積會灌爆主執行緒、反壓 ASR → 音訊積壓。封頂渲染量。
+        // 完整逐字稿在歸檔；codex context 讀的是 store.polished（不受此影響）。
+        let blocks = store.polishedBlocks.suffix(18)
+        for (i, block) in blocks.enumerated() {
             if i > 0 { out += styled("\n\n", 0.92) }
             out += blockHeader(block) + AttributedString("\n") + styled(block.text, 0.92)
             if let zh = block.translation {  // 外語塊的中文譯文 — 縮排灰字，原文下方

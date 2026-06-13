@@ -497,11 +497,13 @@ final class TranscriptStore {
             while let self, !Task.isCancelled {
                 if volatileShown == volatileTarget { break }
                 if volatileTarget.hasPrefix(volatileShown) {
-                    volatileShown = String(volatileTarget.prefix(volatileShown.count + 1))
+                    // 一次推進 3 字 + 80ms：視覺速度 ~37 字/秒不變，但 store 變動（觸發
+                    // overlay 整段重算）頻率降 3 倍 — overlay 重繪是主執行緒積壓主因。
+                    volatileShown = String(volatileTarget.prefix(volatileShown.count + 3))
                 } else {
                     volatileShown = volatileTarget
                 }
-                try? await Task.sleep(for: .milliseconds(25))
+                try? await Task.sleep(for: .milliseconds(80))
             }
             self?.volatileTask = nil
         }
