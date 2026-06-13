@@ -44,6 +44,7 @@ private func composeInstructions(locale: String, contextTail: String) -> String 
 final class TranscriptPolisher {
     private let store: TranscriptStore
     private let archiver: TranscriptArchiver
+    private let metrics: MetricsStore
     private let apiKey: String?
     private let model = "gpt-5.4-mini"
     private var running = false
@@ -52,9 +53,10 @@ final class TranscriptPolisher {
 
     var backendName: String { apiKey == nil ? "無（原文直出）" : model }
 
-    init(store: TranscriptStore, archiver: TranscriptArchiver) {
+    init(store: TranscriptStore, archiver: TranscriptArchiver, metrics: MetricsStore) {
         self.store = store
         self.archiver = archiver
+        self.metrics = metrics
         self.apiKey = Keychain.openAIKey()
     }
 
@@ -136,6 +138,11 @@ final class TranscriptPolisher {
             let body = String(data: data, encoding: .utf8) ?? ""
             throw NSError(domain: "Polish", code: 1,
                           userInfo: [NSLocalizedDescriptionKey: "polish API error: \(body.prefix(200))"])
+        }
+        if let usage = json["usage"] as? [String: Any] {  // token 用量（cost 自己算，API 不給）
+            let p = usage["prompt_tokens"] as? Int ?? 0, comp = usage["completion_tokens"] as? Int ?? 0
+            metrics.recordLLMUsage(prompt: p, completion: comp)
+            Telemetry.polish.info("usage prompt=\(p, privacy: .public) completion=\(comp, privacy: .public)")
         }
         return content.trimmingCharacters(in: .whitespacesAndNewlines)
     }

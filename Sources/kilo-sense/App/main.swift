@@ -52,7 +52,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_: Notification) {
         Task.detached { _ = CodexAgent.shellPath }  // 背景預熱 codex PATH 解析（GUI app 貧瘠環境用）
-        statusBar = StatusBarController()  // 選單列入口（控制 app 的唯一處）
+        statusBar = StatusBarController(metrics: metrics)  // 選單列入口（控制 app 的唯一處）
         showOverlay()
         showSummaryWindow()
         startShakeCapture()
@@ -136,7 +136,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let agent = Keychain.openAIKey().map {
             CodexAgent(workdir: kiloWorkdir, apiKey: $0)
         }
-        let polisher = TranscriptPolisher(store: transcript, archiver: TranscriptArchiver())
+        let polisher = TranscriptPolisher(store: transcript, archiver: TranscriptArchiver(), metrics: metrics)
         logErr("逐字稿整理模型：\(polisher.backendName)")
         let controller = AgentController(store: transcript, agent: agent, metrics: metrics,
                                          polisher: polisher, speakers: speakerTimeline,

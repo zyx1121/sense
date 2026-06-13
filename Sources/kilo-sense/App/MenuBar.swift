@@ -35,8 +35,9 @@ struct KiloMark: View {
 /// 選單列入口 — LSUIElement app 沒有 Dock 圖示，這是唯一能控制 app 的地方
 /// （在這之前要關只能 pkill）。sparkle 呼應 app 內視覺語言。
 @MainActor
-final class StatusBarController: NSObject {
+final class StatusBarController: NSObject, NSMenuDelegate {
     private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    private let metrics: MetricsStore
 
     /// 會議模式開關（main.swift 接 MeetingMode.toggle）；回傳切換後狀態給 checkmark。
     var onMeetingToggle: (() -> Bool)?
@@ -49,7 +50,10 @@ final class StatusBarController: NSObject {
     /// 清除 Kilo 對話（main.swift 接 AgentController.clearConversation；輸入框打 /clear 同效）。
     var onClearConversation: (() -> Void)?
 
-    override init() {
+    private var usageItem: NSMenuItem?  // 本 session 用量行，每次打開選單刷新數字
+
+    init(metrics: MetricsStore) {
+        self.metrics = metrics
         super.init()
         let mark = Brand.mark.copy() as! NSImage
         mark.size = NSSize(width: 18, height: 18 * mark.size.height / mark.size.width)  // 狀態欄高度
@@ -58,11 +62,27 @@ final class StatusBarController: NSObject {
         rebuildMenu()
     }
 
+    /// 選單打開前刷新用量行（只改 title，不重建整個 menu — 重建換物件當次不生效）。
+    func menuWillOpen(_ menu: NSMenu) { refreshUsage() }
+
+    private func refreshUsage() {
+        let cost = String(format: "%.4f", metrics.estimatedCostUSD)
+        usageItem?.title = "本 session：\(metrics.segments) 段 · \(metrics.totalTokens) tokens · ~$\(cost)"
+    }
+
     private func rebuildMenu() {
         let menu = NSMenu()
+        menu.delegate = self
         let title = NSMenuItem(title: "Kilo", action: nil, keyEquivalent: "")
         title.isEnabled = false
         menu.addItem(title)
+
+        // 本 session 用量：逐字稿量 + LLM token + 估算花費（cost 依假定單價，見 MetricsStore）
+        let usage = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        usage.isEnabled = false
+        usageItem = usage
+        refreshUsage()
+        menu.addItem(usage)
         menu.addItem(.separator())
 
         let meeting = add(menu, "會議模式（錄下我的發言）", #selector(toggleMeeting), key: "m")
