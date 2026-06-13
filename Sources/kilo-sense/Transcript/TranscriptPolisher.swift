@@ -46,7 +46,7 @@ final class TranscriptPolisher {
     private let archiver: TranscriptArchiver
     private let metrics: MetricsStore
     private let apiKey: String?
-    private let model = "gpt-5.4-mini"
+    private let model = polishModel  // 預設 gpt-5.4-mini；--polish-model 可換 nano 測
     private var running = false
     private var idleTask: Task<Void, Never>?
     private let pairLogger = PolishPairLogger()  // 語料本金：(raw → cleaned) 配對累積

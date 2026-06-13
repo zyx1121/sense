@@ -66,7 +66,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     func menuWillOpen(_ menu: NSMenu) { refreshUsage() }
 
     private func refreshUsage() {
-        let cost = String(format: "%.4f", metrics.estimatedCostUSD)
+        let cost = String(format: "%.4f", metrics.sessionCostUSD)
         usageItem?.title = "本 session：\(metrics.segments) 段 · \(metrics.totalTokens) tokens · ~$\(cost)"
     }
 

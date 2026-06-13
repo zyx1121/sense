@@ -26,6 +26,16 @@ let kiloWorkdir = NSHomeDirectory() + "/.kilo"
 /// （靜默 gap 分段 + 時間戳，無講者標頭）。`--diarize` 重開分人實驗。
 let diarizationEnabled = CommandLine.arguments.contains("--diarize")
 
+/// polish / translate 用的 OpenAI 模型 — 預設 gpt-5.4-mini；
+/// `--polish-model gpt-5.4-nano` 測更便宜的（用量報告會標 model + 對應費率）。
+let polishModel: String = {
+    let args = CommandLine.arguments
+    if let i = args.firstIndex(of: "--polish-model"), args.indices.contains(i + 1) {
+        return args[i + 1]
+    }
+    return "gpt-5.4-mini"
+}()
+
 if CommandLine.arguments.contains("--locales") {
     await dumpLocales()
     exit(0)
