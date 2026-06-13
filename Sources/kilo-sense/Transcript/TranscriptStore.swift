@@ -87,8 +87,6 @@ struct PendingSegment {
     let text: String
     let source: String?  // 來源（前景 app / 視窗標題）；會議 mic 標「我」
     var timeRange: CMTimeRange? = nil
-    /// word 級時間切片 — 一筆 final 可能橫跨講者換人點，取批前靠這個在邊界切段。
-    var pieces: [(text: String, range: CMTimeRange)] = []
 }
 
 /// overlay 上一個整理完的段塊 + 顯示用 metadata。塊頭 = 時間戳 + [音訊來源圖示]
@@ -200,15 +198,13 @@ final class TranscriptStore {
     }
 
     func commitFinal(_ text: String, locale: String, source: String? = nil,
-                     timeRange: CMTimeRange? = nil,
-                     pieces: [(text: String, range: CMTimeRange)] = []) {
+                     timeRange: CMTimeRange? = nil) {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         volatileTask?.cancel(); volatileTask = nil
         volatileTarget = ""; volatileShown = ""
         guard !t.isEmpty else { return }
         pending.append(PendingSegment(locale: locale, text: t, source: source,
-                                      timeRange: timeRange,
-                                      pieces: pieces))  // 一筆 final 一段，不合併 — polisher 按段消耗才不會吃到飛中的新字
+                                      timeRange: timeRange))  // 一筆 final 一段，不合併
         while pendingRaw.count > 12000, !pending.isEmpty { pending.removeFirst() }  // 無 polisher 時的安全閥
     }
 

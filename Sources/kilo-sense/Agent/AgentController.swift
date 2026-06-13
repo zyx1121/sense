@@ -58,10 +58,8 @@ final class AgentController {
     /// 每段定稿進逐字稿（顯示 + codex context），並戳 polisher 整理。
     /// 帶 timeRange 進 pending（記音訊時長 → 花費分母）、fallback 來源（前景 app）；
     /// locale 跟著進 pending（整理選對指令語言）。
-    func appendFinal(_ text: String, locale: String, timeRange: CMTimeRange? = nil,
-                     pieces: [(text: String, range: CMTimeRange)] = []) {
-        store.commitFinal(text, locale: locale, source: sources.current(), timeRange: timeRange,
-                          pieces: pieces)
+    func appendFinal(_ text: String, locale: String, timeRange: CMTimeRange? = nil) {
+        store.commitFinal(text, locale: locale, source: sources.current(), timeRange: timeRange)
         metrics.recordSegment(chars: text.count)
         if let timeRange { metrics.recordAudio(seconds: timeRange.duration.seconds) }  // 「每 10 分鐘花費」的分母
         polisher.nudge()
