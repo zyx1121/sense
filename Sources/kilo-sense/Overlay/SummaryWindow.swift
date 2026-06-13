@@ -156,14 +156,6 @@ struct TranscriptView: View {
                                 copyText([store.polished, store.pendingRaw, store.volatileShown]
                                     .filter { !$0.isEmpty }.joined(separator: "\n"))
                             }
-                            // 命名講者：點了在輸入框預填 /name 指令，補上名字送出即 enroll
-                            let letters = controller.anonymousLetters()
-                            if !letters.isEmpty {
-                                Divider()
-                                ForEach(letters, id: \.self) { l in
-                                    Button("命名講者 \(l)…") { store.inputDraft = "/name \(l) " }
-                                }
-                            }
                             Divider()
                             Button("清除逐字稿（已存檔的不動）", role: .destructive) {
                                 store.clearTranscript()
@@ -453,7 +445,7 @@ private struct PolishedTranscript: View {
         return out
     }
 
-    /// 塊頭：時間戳 · 音訊圖示 · 語言 · (講者/來源) · 字數時長。
+    /// 塊頭：時間戳 · 音訊圖示 · 語言 · 來源 · 字數時長。
     private func header(_ block: PolishedBlock) -> AttributedString {
         func part(_ s: String, _ color: Color, _ weight: Font.Weight = .semibold) -> AttributedString {
             var a = AttributedString(s); a.foregroundColor = color
@@ -462,9 +454,7 @@ private struct PolishedTranscript: View {
         let dim = Color.white.opacity(0.4)
         var h = part(Self.timeFormat.string(from: block.at), dim)
         h += part("  \(block.isMic ? "🎤" : "🔊") \(block.locale.hasPrefix("zh") ? "中" : "EN")", dim, .medium)
-        if let speaker = block.speaker {
-            h += part("  " + speaker, .cyan.opacity(0.8))
-        } else if let source = block.source {
+        if let source = block.source {
             h += part("  " + source.prefix(28), .white.opacity(0.5), .medium)
         }
         var tail = "  · \(block.charCount) 字"
