@@ -312,6 +312,12 @@ struct TranscriptView: View {
         for (i, block) in store.polishedBlocks.enumerated() {
             if i > 0 { out += styled("\n\n", 0.92) }
             out += blockHeader(block) + AttributedString("\n") + styled(block.text, 0.92)
+            if let zh = block.translation {  // 外語塊的中文譯文 — 縮排灰字，原文下方
+                var t = AttributedString("\n　" + zh.replacingOccurrences(of: "\n\n", with: "\n　"))
+                t.foregroundColor = .cyan.opacity(0.55)
+                t.font = .system(size: sz(11.5))
+                out += t
+            }
         }
         return out + styled(store.pendingRaw, 0.55) + styled(store.volatileShown, 0.38)
     }

@@ -93,13 +93,15 @@ struct PendingSegment {
 
 /// overlay 上一個整理完的段塊 + 顯示用 metadata。塊頭 = 時間戳 + [音訊來源圖示]
 /// + [語言] + (講者 / app 來源) + 字數·時長。
-struct PolishedBlock {
+struct PolishedBlock: Identifiable {
+    let id = UUID()           // 翻譯背景回填用
     var speaker: String?      // 講者名（分人開啟時），分人關閉恆 nil
     var source: String?       // app 來源（前景 app · 視窗標題）或會議 mic 的「我」
     let locale: String        // bcp47 — 標 [中]/[EN]
     var text: String          // 整理後文字（同塊續批會 append）
     let at: Date              // 開塊時間（標頭時間戳）
     var range: CMTimeRange?   // 音訊時間範圍（聯集；算時長 + 回溯補標）
+    var translation: String?  // 外語塊的中文譯文（背景翻譯填，逐批累積）
 
     /// mic（會議我這側）vs 系統音訊 — 來源標「我」即 mic。
     var isMic: Bool { source == "我" }
@@ -362,15 +364,15 @@ final class TranscriptStore {
     @discardableResult
     func commitPolished(_ cleaned: String, locale: String, consumedSegments: Int,
                         source: String? = nil, isSpeaker: Bool = false, epoch: Int? = nil,
-                        timeRange: CMTimeRange? = nil) -> String? {
+                        timeRange: CMTimeRange? = nil) -> (text: String?, blockID: UUID?) {
         // 清除後才落地的批：它消耗的段已被 clearTranscript 清空，再 removeFirst 會吃掉
         // 清除後新進的段（沒整理沒歸檔直接蒸發）— 過期批不消耗
         if epoch == nil || epoch == transcriptEpoch {
             pending.removeFirst(min(consumedSegments, pending.count))
         }
         let c = breakLines(trimOverlap(cleaned.trimmingCharacters(in: .whitespacesAndNewlines)))
-        guard !c.isEmpty else { return nil }
-        if let epoch, epoch != transcriptEpoch { return c }  // 清除後才回來的批：歸檔照走、畫面不復活
+        guard !c.isEmpty else { return (nil, nil) }
+        if let epoch, epoch != transcriptEpoch { return (c, nil) }  // 清除後才回來的批：歸檔照走、畫面不復活
         let speaker = (diarizationEnabled && isSpeaker) ? source : nil
         let sentenceEnd = polishedBlocks.last?.text.last.map { "。！？.!?…".contains($0) } ?? false
         let langChanged = lastPolishedLocale != nil && lastPolishedLocale != locale
@@ -429,7 +431,15 @@ final class TranscriptStore {
         recentTurns.append((source, c, timeRange))  // 輪替史 — enricher 推角色/人名的原料
         if recentTurns.count > 30 { recentTurns.removeFirst(recentTurns.count - 30) }
         turnsVersion += 1
-        return c  // 實際上稿的文字（裁 echo、斷行後）— 給歸檔用
+        return (c, polishedBlocks.last?.id)  // 上稿文字（給歸檔）+ 這批進的塊 id（給翻譯回填）
+    }
+
+    /// 背景翻譯回填：找到該塊把中文譯文逐批累積（塊已被記憶體閥裁掉就放棄）。
+    func appendTranslation(blockID: UUID, _ zh: String) {
+        guard let i = polishedBlocks.firstIndex(where: { $0.id == blockID }) else { return }
+        let t = zh.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return }
+        polishedBlocks[i].translation = polishedBlocks[i].translation.map { $0 + "\n\n" + t } ?? t
     }
 
     /// 句末標點後斷行：中文「。！？」直接斷；英文「. ! ?」後接空格才斷（"U.S. Army" 會誤斷，接受）。

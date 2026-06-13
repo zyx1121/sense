@@ -95,22 +95,58 @@ final class TranscriptPolisher {
         let tail = String(store.polished.suffix(120))
         let epoch = store.transcriptEpoch  // 清除畫面時這批只進歸檔、不上畫面
         Task {
-            var committed: String?
+            var result: (text: String?, blockID: UUID?) = (nil, nil)
             do {
                 let cleaned = try await polish(chunk: run.text, locale: run.locale, contextTail: tail)
-                committed = store.commitPolished(cleaned.isEmpty ? run.text : cleaned, locale: run.locale, consumedSegments: run.segments, source: run.source, isSpeaker: run.isSpeaker, epoch: epoch, timeRange: run.timeRange)
+                result = store.commitPolished(cleaned.isEmpty ? run.text : cleaned, locale: run.locale, consumedSegments: run.segments, source: run.source, isSpeaker: run.isSpeaker, epoch: epoch, timeRange: run.timeRange)
                 Telemetry.polish.info("polished [\(run.locale, privacy: .public)] \(run.text.count, privacy: .public) -> \(cleaned.count, privacy: .public) chars")
                 if !cleaned.isEmpty {
                     pairLogger.log(raw: run.text, cleaned: cleaned, locale: run.locale, contextTail: tail)
                 }
             } catch {
-                committed = store.commitPolished(run.text, locale: run.locale, consumedSegments: run.segments, source: run.source, isSpeaker: run.isSpeaker, epoch: epoch, timeRange: run.timeRange)  // 原文轉正，不卡顯示
+                result = store.commitPolished(run.text, locale: run.locale, consumedSegments: run.segments, source: run.source, isSpeaker: run.isSpeaker, epoch: epoch, timeRange: run.timeRange)  // 原文轉正，不卡顯示
                 Telemetry.polish.error("polish failed: \(error.localizedDescription, privacy: .public)")
             }
-            if let committed { archiver.append(committed, source: run.source) }  // 持久化（整理後的定稿）
+            if let text = result.text { archiver.append(text, source: run.source) }  // 持久化（整理後的定稿）
+            // 外語段落（非中文）背景翻成中文，回填該塊 — 中文內容不翻（省 token，母語免譯）
+            if let text = result.text, let id = result.blockID, !run.locale.hasPrefix("zh") {
+                Task { [weak self] in
+                    guard let self, let zh = try? await translate(text) else { return }
+                    store.appendTranslation(blockID: id, zh)
+                }
+            }
             running = false
             nudge()  // 積壓續跑 / 重設 idle timer
         }
+    }
+
+    /// 外語段落 → 繁中譯文（gpt-5.4-mini，只給譯文）。token 計入 metrics。
+    private func translate(_ text: String) async throws -> String {
+        guard let apiKey else { return "" }
+        var req = URLRequest(url: URL(string: "https://api.openai.com/v1/chat/completions")!)
+        req.httpMethod = "POST"
+        req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.timeoutInterval = 20
+        req.httpBody = try JSONSerialization.data(withJSONObject: [
+            "model": model,
+            "messages": [
+                ["role": "system", "content": "把使用者訊息翻成繁體中文，只輸出譯文本身，不要任何說明、引號或標記。"],
+                ["role": "user", "content": text],
+            ],
+            "max_completion_tokens": 2000,
+        ])
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        guard (resp as? HTTPURLResponse)?.statusCode == 200,
+              let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let choices = json["choices"] as? [[String: Any]],
+              let content = (choices.first?["message"] as? [String: Any])?["content"] as? String
+        else { return "" }
+        if let usage = json["usage"] as? [String: Any] {
+            metrics.recordLLMUsage(prompt: usage["prompt_tokens"] as? Int ?? 0,
+                                   completion: usage["completion_tokens"] as? Int ?? 0)
+        }
+        return content.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// gpt-5.4-mini 直打 chat completions：system 放指令、user 只放 raw chunk。
