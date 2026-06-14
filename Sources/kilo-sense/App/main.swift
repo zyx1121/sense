@@ -1,6 +1,5 @@
 import AppKit
 import Foundation
-import OSLog
 import Speech
 import SwiftUI
 

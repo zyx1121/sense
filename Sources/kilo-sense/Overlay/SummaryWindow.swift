@@ -1,6 +1,5 @@
 import AppKit
 import SwiftUI
-import UniformTypeIdentifiers
 
 /// borderless panel 必須 override canBecomeKey，input TextField 才拿得到焦點打字。
 final class KeyablePanel: NSPanel {
