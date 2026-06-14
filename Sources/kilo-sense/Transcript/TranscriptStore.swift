@@ -127,6 +127,8 @@ final class TranscriptStore {
     private(set) var pending: [PendingSegment] = []
     private(set) var volatileShown = ""
     private var volatileTarget = ""
+    /// mic（會議我這側）即時字 — 跟系統音的 volatile 不同槽，tail 另起一行標 🎤，不互相覆蓋。
+    private(set) var micVolatile = ""
     private var volatileTask: Task<Void, Never>?
 
     /// 顯示與 codex context 用的待整理全文。
@@ -153,7 +155,7 @@ final class TranscriptStore {
     /// 清畫面開新段落：已歸檔的不動（~/.kilo/transcripts 永遠完整），只清顯示與待整理層。
     func clearTranscript() {
         volatileTask?.cancel(); volatileTask = nil
-        polishedBlocks = []; pending = []; volatileTarget = ""; volatileShown = ""
+        polishedBlocks = []; pending = []; volatileTarget = ""; volatileShown = ""; micVolatile = ""
         lastPolishedLocale = nil
         transcriptEpoch += 1
         touchOverlay()
@@ -192,8 +194,8 @@ final class TranscriptStore {
     private var overlayHideTask: Task<Void, Never>?
     private let overlayIdleSeconds: Double = 30
 
-    var transcriptLength: Int { polished.count + pendingRaw.count + volatileShown.count }
-    var transcriptEmpty: Bool { polished.isEmpty && pendingRaw.isEmpty && volatileShown.isEmpty }
+    var transcriptLength: Int { polished.count + pendingRaw.count + volatileShown.count + micVolatile.count }
+    var transcriptEmpty: Bool { polished.isEmpty && pendingRaw.isEmpty && volatileShown.isEmpty && micVolatile.isEmpty }
 
     /// 餵給 codex 的 context（整理過 + 未整理 + 辨識中的尾端）。
     var context: String { String(glue(glue(polished, pendingRaw), volatileTarget).suffix(4000)) }
@@ -204,6 +206,10 @@ final class TranscriptStore {
         volatileTarget = text
         pumpVolatile()
     }
+
+    /// mic 即時字（會議模式我這側）— 直接設、不走打字機（系統音那條才用打字機）。
+    func setMicVolatile(_ text: String) { micVolatile = text }
+    func clearMicVolatile() { micVolatile = "" }
 
     func commitFinal(_ text: String, locale: String, source: String? = nil,
                      timeRange: CMTimeRange? = nil) {

@@ -62,6 +62,7 @@ final class MeetingMode {
 
     private func stop() {
         isOn = false
+        store.clearMicVolatile()  // 關閉會議 → 清掉即時字那行
         Telemetry.meeting.info("off")
         Task { [weak self] in await self?.mic.stop() }  // stream finish → pump 自然結束
     }
@@ -75,6 +76,9 @@ final class MeetingMode {
             if volatileSeen % 20 == 1 {
                 Telemetry.meeting.info("volatile #\(self.volatileSeen, privacy: .public) \(String(r.text.prefix(20)), privacy: .public)")
             }
+            // mic 即時字 → 獨立 micVolatile 槽（tail 標 🎤）；PTT 期間讓給輸入框、噪音不顯示
+            let live = (store.pttRecording || Date() < store.pttTailUntil || (r.confidence ?? 1) < noiseFloor) ? "" : r.text
+            store.setMicVolatile(live)
             return
         }
         Telemetry.meeting.info("final conf=\(r.confidence ?? -1, format: .fixed(precision: 2), privacy: .public) text=\(String(r.text.prefix(30)), privacy: .public)")

@@ -67,6 +67,7 @@ final class AgentController {
 
     /// 會議模式：mic（你這側）的定稿 — 來源固定標「我」，不跟前景 app。
     func appendMicFinal(_ text: String, locale: String) {
+        store.clearMicVolatile()  // 定稿落地 → 清掉即時字那行
         store.commitFinal(text, locale: locale, source: "我")
         metrics.recordSegment(chars: text.count)
         polisher.nudge()

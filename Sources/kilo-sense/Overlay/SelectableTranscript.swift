@@ -74,7 +74,14 @@ struct SelectableTranscript: NSViewRepresentable {
         }
         let tail = NSMutableAttributedString()
         tail.append(white(store.pendingRaw, 0.55))
-        tail.append(white(store.volatileShown, 0.38))
+        tail.append(white(store.volatileShown, 0.38))  // 對方（系統音）即時字
+        if !store.micVolatile.isEmpty {  // 我（mic）即時字 — 另起一行標 🎤、淡 cyan 與對方區分
+            if tail.length > 0 { tail.append(white("\n", 0.5)) }
+            tail.append(NSAttributedString(string: "🎤 " + store.micVolatile, attributes: [
+                .font: NSFont.systemFont(ofSize: 12 * scale),
+                .foregroundColor: NSColor.systemCyan.withAlphaComponent(0.5),
+                .paragraphStyle: para]))
+        }
         if tail.length > 0 {
             if !store.polishedBlocks.isEmpty { out.append(white("\n", 0.55)) }
             out.append(tail)
