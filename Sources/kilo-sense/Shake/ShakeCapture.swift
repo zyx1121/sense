@@ -16,6 +16,7 @@ final class ShakeCapture {
     private var clicker: ClickInterceptor?
 
     private var selecting = false
+    private var dragStart: CGPoint?   // 左鍵按下點（CG 座標）— 拖過門檻 = 框選截圖，否則點擊收元素
     private var current = OverlayInfo()
     private var lastProbeAt: TimeInterval = 0
     private let probeInterval: TimeInterval = 1.0 / 30.0
@@ -38,8 +39,14 @@ final class ShakeCapture {
         detector.start()
 
         let interceptor = ClickInterceptor(
-            onLeftClick: { p in
-                Task { @MainActor [weak self] in self?.clicked(at: p) }
+            onLeftDown: { p in
+                Task { @MainActor [weak self] in self?.dragBegan(at: p) }
+            },
+            onLeftDragged: { p in
+                Task { @MainActor [weak self] in self?.dragMoved(to: p) }
+            },
+            onLeftUp: { p in
+                Task { @MainActor [weak self] in self?.dragEnded(at: p) }
             },
             onRightClick: { _ in
                 Task { @MainActor [weak self] in self?.end() }
@@ -83,7 +90,7 @@ final class ShakeCapture {
     }
 
     private func moved(_ p: NSPoint) {
-        guard selecting else { return }
+        guard selecting, dragStart == nil else { return }  // 拖曳中只畫框、不探元素
         probeNow(at: p, force: false)
     }
 
@@ -112,5 +119,48 @@ final class ShakeCapture {
                 Telemetry.shake.error("capture failed — no text and no frame")
             }
         }
+    }
+
+    // MARK: 左鍵 — 點擊收元素 / 拖曳框選截圖
+
+    private func dragBegan(at p: CGPoint) {
+        guard selecting else { return }
+        dragStart = p
+    }
+
+    private func dragMoved(to p: CGPoint) {
+        guard selecting, let s = dragStart else { return }
+        dim.setHighlight(Self.rect(s, p))  // 即時畫出框選範圍
+    }
+
+    private func dragEnded(at p: CGPoint) {
+        guard selecting, let s = dragStart else { return }
+        dragStart = nil
+        let r = Self.rect(s, p)
+        if r.width > 6, r.height > 6 {
+            captureRegion(r)   // 拖出範圍 → 截該區塊
+        } else {
+            clicked(at: p)     // 沒拖（單純點擊）→ 收游標下元素
+        }
+    }
+
+    /// 框選區塊截圖 → chip（座標同 AX 元素：CG top-left，Capturer 直接吃）。
+    private func captureRegion(_ rect: CGRect) {
+        var info = OverlayInfo()
+        info.app = "圈選區域"
+        info.frame = rect
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            if let asset = await self.capturer.capture(info: info) {
+                self.store.addAttachment(asset)
+                Telemetry.shake.info("captured region \(Int(rect.width))x\(Int(rect.height))")
+            } else {
+                Telemetry.shake.error("region capture failed")
+            }
+        }
+    }
+
+    private static func rect(_ a: CGPoint, _ b: CGPoint) -> CGRect {
+        CGRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(a.x - b.x), height: abs(a.y - b.y))
     }
 }

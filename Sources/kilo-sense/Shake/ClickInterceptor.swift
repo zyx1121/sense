@@ -6,7 +6,9 @@ import Foundation
 /// 左鍵 = 捕捉游標下元素、右鍵 = 結束選取；passThroughRect（kilo 自己的視窗）放行。
 /// Ported from zyx1121/shake。
 final class ClickInterceptor: @unchecked Sendable {
-    private let onLeftClick: @Sendable (CGPoint) -> Void
+    private let onLeftDown: @Sendable (CGPoint) -> Void
+    private let onLeftDragged: @Sendable (CGPoint) -> Void
+    private let onLeftUp: @Sendable (CGPoint) -> Void
     private let onRightClick: @Sendable (CGPoint) -> Void
     private var tap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
@@ -15,10 +17,14 @@ final class ClickInterceptor: @unchecked Sendable {
     private var _passThroughRect: CGRect = .zero
 
     init(
-        onLeftClick: @escaping @Sendable (CGPoint) -> Void,
+        onLeftDown: @escaping @Sendable (CGPoint) -> Void,
+        onLeftDragged: @escaping @Sendable (CGPoint) -> Void,
+        onLeftUp: @escaping @Sendable (CGPoint) -> Void,
         onRightClick: @escaping @Sendable (CGPoint) -> Void = { _ in }
     ) {
-        self.onLeftClick = onLeftClick
+        self.onLeftDown = onLeftDown
+        self.onLeftDragged = onLeftDragged
+        self.onLeftUp = onLeftUp
         self.onRightClick = onRightClick
     }
 
@@ -92,16 +98,30 @@ final class ClickInterceptor: @unchecked Sendable {
             if passThrough.contains(loc) {
                 return Unmanaged.passUnretained(event)
             }
-            let cb = onLeftClick
+            let cb = onLeftDown
             DispatchQueue.main.async { cb(loc) }
             return nil
 
-        case .leftMouseUp, .leftMouseDragged:
+        case .leftMouseDragged:
             let (intercept, passThrough) = snapshot()
             guard intercept else { return Unmanaged.passUnretained(event) }
-            if passThrough.contains(event.location) {
+            let loc = event.location
+            if passThrough.contains(loc) {
                 return Unmanaged.passUnretained(event)
             }
+            let cb = onLeftDragged
+            DispatchQueue.main.async { cb(loc) }
+            return nil
+
+        case .leftMouseUp:
+            let (intercept, passThrough) = snapshot()
+            guard intercept else { return Unmanaged.passUnretained(event) }
+            let loc = event.location
+            if passThrough.contains(loc) {
+                return Unmanaged.passUnretained(event)
+            }
+            let cb = onLeftUp
+            DispatchQueue.main.async { cb(loc) }
             return nil
 
         case .rightMouseDown:
