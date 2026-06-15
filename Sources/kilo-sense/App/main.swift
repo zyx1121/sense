@@ -20,14 +20,16 @@ func logErr(_ s: String) { FileHandle.standardError.write(Data((s + "\n").utf8))
 /// codex agent 的 workspace；reply 裡的相對路徑連結也解析到這底下。
 let kiloWorkdir = NSHomeDirectory() + "/.kilo"
 
-/// polish / translate 用的 OpenAI 模型 — 預設 gpt-5.4-nano（實測同 talk 比 mini 省 ~72%、
-/// 品質沒明顯退步）；`--polish-model gpt-5.4-mini` 可換回。codex 問答另用 gpt-5.4（複雜任務）。
+/// polish / translate 用的 OpenAI 模型 — 預設 gpt-5.4-mini。盲測中文語境/語法錯字 mini 14/14、
+/// nano 只 6/14 且輪間不穩（在/再、的/得、時做→實作 修不掉，連簡繁殘渣都漏）；nano 英文好認的
+/// homophone 行但真實 garbled/專名一樣漏。`--polish-model gpt-5.4-nano` 省 ~72% 成本（品質換成本，
+/// 中文錯字會漏）。codex 問答另用 gpt-5.4（複雜任務）。
 let polishModel: String = {
     let args = CommandLine.arguments
     if let i = args.firstIndex(of: "--polish-model"), args.indices.contains(i + 1) {
         return args[i + 1]
     }
-    return "gpt-5.4-nano"
+    return "gpt-5.4-mini"
 }()
 
 /// 確保 ~/.kilo/AGENTS.md 存在 — codex 以 ~/.kilo 為 workdir，會自動載它當工作區方位指引
