@@ -130,6 +130,8 @@ Transcript cleanup goes through `gpt-5.4-mini` over the API directly (no OpenAI 
 ```bash
 ./build/Kilo.app/Contents/MacOS/Kilo --langs zh-TW,en-US   # dual-path confidence routing (default)
 ./build/Kilo.app/Contents/MacOS/Kilo --lang ja-JP          # single language
+./build/Kilo.app/Contents/MacOS/Kilo --diarize             # experimental: tag different system-audio speakers 講者 A/B/C
+                                                           #   (--diarize-threshold 0.5 to tune; downloads a speaker-embedding model on first run)
 ```
 
 ## Privacy — where data goes

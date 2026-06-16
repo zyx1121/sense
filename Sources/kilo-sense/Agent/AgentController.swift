@@ -32,6 +32,8 @@ final class AgentController {
     private let agent: CodexAgent?
     private let metrics: MetricsStore
     private let polisher: TranscriptPolisher
+    private let speakers: SpeakerTimeline?
+    private let clusterer: SpeakerClusterer?
     private let isMeeting: () -> Bool
     private let sources = SourceTracker()
     private let screenCapturer = Capturer()
@@ -42,12 +44,26 @@ final class AgentController {
 
     init(store: TranscriptStore, agent: CodexAgent?, metrics: MetricsStore,
          polisher: TranscriptPolisher,
+         speakers: SpeakerTimeline? = nil, clusterer: SpeakerClusterer? = nil,
          isMeeting: @escaping () -> Bool = { false }) {
         self.store = store
         self.agent = agent
         self.metrics = metrics
         self.polisher = polisher
+        self.speakers = speakers
+        self.clusterer = clusterer
         self.isMeeting = isMeeting
+        if diarizationEnabled, let speakers {  // commitPolished 查某段主講者字母（mic 段已在 store 端擋掉）
+            store.speakerResolver = { [weak self] range in self?.resolveSpeaker(range, speakers: speakers) }
+        }
+    }
+
+    /// 某段（系統音）的主講者標籤 — 會議模式 = 「對方 X」，否則「講者 X」。
+    private func resolveSpeaker(_ range: CMTimeRange?, speakers: SpeakerTimeline) -> String? {
+        guard let range,
+              let letter = speakers.dominantLetter(start: range.start.seconds, end: range.end.seconds)
+        else { return nil }
+        return (isMeeting() ? "對方 " : "講者 ") + letter
     }
 
     /// 辨識中的 volatile → overlay 灰字尾巴（打字機）。
@@ -62,6 +78,9 @@ final class AgentController {
         store.commitFinal(text, locale: locale, source: sources.current(), timeRange: timeRange)
         metrics.recordSegment(chars: text.count)
         if let timeRange { metrics.recordAudio(seconds: timeRange.duration.seconds) }  // 「每 10 分鐘花費」的分母
+        if let clusterer, let r = timeRange {  // 系統音這段 → 背景抽 embedding 配講者字母，commit 時 timeline 查得到
+            Task { await clusterer.label(start: r.start.seconds, end: r.end.seconds) }
+        }
         polisher.nudge()
     }
 

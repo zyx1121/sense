@@ -101,6 +101,7 @@ struct TParagraph: Identifiable {
 struct PolishedBlock: Identifiable {
     let id = UUID()
     var source: String?       // app 來源（前景 app · 視窗標題）或會議 mic 的「我」
+    var speaker: String?      // 分人字母「講者 A」/「對方 A」；nil = 未分人 / 未判定 / mic（我）
     let locale: String        // bcp47 — 標 [中]/[EN]
     var paras: [TParagraph]   // 段落（各自帶譯文）；同塊續批 append
     let at: Date              // 開塊時間（標頭時間戳）
@@ -125,6 +126,9 @@ final class TranscriptStore {
     /// 已整理全文（不含講者標頭）— codex context、polisher 前文參考、長度計算用。
     var polished: String { polishedBlocks.map(\.text).joined(separator: "\n\n") }
     private(set) var pending: [PendingSegment] = []
+    /// 分人（--diarize）：依某段的 timeRange 查主講者標籤（「對方/講者 X」）。
+    /// AgentController 在分人開啟時注入；commitPolished 開塊時查（mic 段不查）。
+    var speakerResolver: ((CMTimeRange?) -> String?)?
     private(set) var volatileShown = ""
     private var volatileTarget = ""
     /// mic（會議我這側）即時字 — 跟系統音的 volatile 不同槽，tail 另起一行標 🎤，不互相覆蓋。
@@ -283,11 +287,14 @@ final class TranscriptStore {
             .filter { !$0.isEmpty }
             .map { TParagraph(text: $0) }
         guard !newParas.isEmpty else { return (c, nil, []) }
-        // 同塊判定：純逐字稿，同來源 + 同語言 + 靜默 gap ≤ 2.5s 續塊，否則開新塊。
+        // 分人：查這批 timeRange 的主講者字母（mic「我」不查）。換講者也斷塊，A/B 不黏同塊。
+        let speaker = source == "我" ? nil : speakerResolver?(timeRange)
+        // 同塊判定：純逐字稿，同來源 + 同語言 + 同講者 + 靜默 gap ≤ 2.5s 續塊，否則開新塊。
         let sameBlock: Bool = {
             guard let last = polishedBlocks.last else { return false }
             if last.source != source { return false }  // app 來源切換 → 開新塊
             if last.locale != locale { return false }  // 語言切換 → 開新塊
+            if last.speaker != speaker { return false }  // 換講者 → 開新塊
             guard let lr = last.range, let cur = timeRange else { return true }
             return cur.start.seconds - lr.end.seconds <= 2.5
         }()
@@ -299,8 +306,8 @@ final class TranscriptStore {
                 } ?? timeRange
             }
         } else {
-            polishedBlocks.append(PolishedBlock(  // 換來源/語言/靜默開新塊
-                source: source, locale: locale, paras: newParas, at: Date(), range: timeRange))
+            polishedBlocks.append(PolishedBlock(  // 換來源/語言/講者/靜默開新塊
+                source: source, speaker: speaker, locale: locale, paras: newParas, at: Date(), range: timeRange))
         }
         lastPolishedLocale = locale
         // 記憶體安全閥：總量超標先丟最舊的塊 → 最舊的段 → 裁首段頭
