@@ -128,8 +128,8 @@ Requirements:
 Transcript cleanup goes through `gpt-5.4-mini` over the API directly (no OpenAI key → raw text passes through unpolished).
 
 ```bash
-./build/kilo-sense.app/Contents/MacOS/kilo-sense --langs zh-TW,en-US   # dual-path confidence routing (default)
-./build/kilo-sense.app/Contents/MacOS/kilo-sense --lang ja-JP          # single language
+./build/Kilo.app/Contents/MacOS/Kilo --langs zh-TW,en-US   # dual-path confidence routing (default)
+./build/Kilo.app/Contents/MacOS/Kilo --lang ja-JP          # single language
 ```
 
 ## Privacy — where data goes

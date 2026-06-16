@@ -128,8 +128,8 @@ make publish   # make release + 傳上 GitHub Release（簽名私鑰不出本機
 逐字稿整理走 `gpt-5.4-mini` 直打 API（沒 OpenAI key → 原文直出，不整理）。
 
 ```bash
-./build/kilo-sense.app/Contents/MacOS/kilo-sense --langs zh-TW,en-US   # 雙路信心擇優（預設）
-./build/kilo-sense.app/Contents/MacOS/kilo-sense --lang ja-JP          # 單語模式
+./build/Kilo.app/Contents/MacOS/Kilo --langs zh-TW,en-US   # 雙路信心擇優（預設）
+./build/Kilo.app/Contents/MacOS/Kilo --lang ja-JP          # 單語模式
 ```
 
 ## 隱私 — 資料去哪

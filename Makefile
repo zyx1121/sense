@@ -1,6 +1,8 @@
-APP_NAME   := kilo-sense
+# PRODUCT = SwiftPM 產物 / binary（專案名，不變）；APP_NAME = 對外應用名（.app / 顯示名 / DMG）
+PRODUCT    := kilo-sense
+APP_NAME   := Kilo
 BUNDLE_ID  := tw.zyx.kilo
-BIN_PATH   := .build/release/$(APP_NAME)
+BIN_PATH   := .build/release/$(PRODUCT)
 APP_BUNDLE := build/$(APP_NAME).app
 CONTENTS   := $(APP_BUNDLE)/Contents
 VERSION    := $(shell /usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" Resources/Info.plist)
@@ -42,6 +44,7 @@ rebuild: clean bundle
 
 # 安裝到 /Applications（開機自啟與穩定 TCC 都需要 app 在這裡）
 install: bundle
+	@rm -rf /Applications/kilo-sense.app   # 清舊名安裝（rename 遷移）
 	@rm -rf /Applications/$(APP_NAME).app
 	@cp -R $(APP_BUNDLE) /Applications/
 	@echo "[OK] installed to /Applications/$(APP_NAME).app"
