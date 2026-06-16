@@ -59,6 +59,11 @@ if CommandLine.arguments.contains("--locales") {
     exit(0)
 }
 
+if CommandLine.arguments.contains("--diarize-selftest") {  // 分人核心驗證：音檔 → diarizer segments（headless）
+    await runDiarizeSelfTest()
+    exit(0)
+}
+
 // 系統音訊 → 瀏海字幕 + 連續逐字稿（小模型即時整理）；shake 圈選畫面 + codex agent 分析
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -75,11 +80,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusBar: StatusBarController?
     private var pushToTalk: PushToTalk?
     private var meetingMode: MeetingMode?
+    private let speakerTimeline = SpeakerTimeline()
+    private var diarizer: SpeakerDiarizer?   // --diarize 才建；nil = 不分人
 
     func applicationDidFinishLaunching(_: Notification) {
         Task.detached { _ = CodexAgent.shellPath }  // 背景預熱 codex PATH 解析（GUI app 貧瘠環境用）
         seedAgentsFile()  // 缺檔才寫；codex 自動載 ~/.kilo/AGENTS.md 當工作區方位指引
         statusBar = StatusBarController(metrics: metrics)  // 選單列入口（控制 app 的唯一處）
+        if diarizationEnabled {  // 分人軌：獨立跑原始音訊，講者標非同步疊回逐字稿（須在 showSummaryWindow 前）
+            let d = SpeakerDiarizer(timeline: speakerTimeline,
+                                    onUpdate: { [weak self] in self?.transcript.refreshSpeakers() })
+            d.warmUp()
+            diarizer = d
+        }
         showOverlay()
         showSummaryWindow()
         startShakeCapture()
@@ -156,7 +169,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let polisher = TranscriptPolisher(store: transcript, archiver: TranscriptArchiver(), metrics: metrics)
         logErr("逐字稿整理模型：\(polisher.backendName)")
         let controller = AgentController(store: transcript, agent: agent, metrics: metrics,
-                                         polisher: polisher,
+                                         polisher: polisher, speakers: speakerTimeline,
                                          isMeeting: { [weak self] in self?.meetingMode?.isOn == true })
         self.agentController = controller
         let win = SummaryWindow(store: transcript, controller: controller)
@@ -195,8 +208,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 for t in transcribers { try await t.setUp() }
                 let audio = try await startAudioWithRetry()
                 logErr("就緒，聽取中…")
+                // streamSeconds = ASR 時間軸（audioTimeRange 的時鐘）— 分人軌 atTime 對時用，
+                // 同一條 buffer 流逐顆累計，session 內與 ASR 零漂移。
+                var streamSeconds: Double = 0
                 for await buffer in audio {
                     for t in transcribers { try await t.stream(buffer) }
+                    if let diarizer {
+                        diarizer.feed(buffer, at: streamSeconds)
+                        streamSeconds += Double(buffer.pcm.frameLength) / buffer.pcm.format.sampleRate
+                    }
                 }
             } catch {
                 logErr("error: \(error)")
