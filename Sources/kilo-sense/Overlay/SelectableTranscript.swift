@@ -96,18 +96,9 @@ struct SelectableTranscript: NSViewRepresentable {
                 .foregroundColor: NSColor.white.withAlphaComponent(opacity),
                 .paragraphStyle: para])
         }
-        func cyan(_ s: String, _ opacity: CGFloat) -> NSAttributedString {  // 分人講者字母（非同步疊上）
-            NSAttributedString(string: s, attributes: [
-                .font: NSFont.systemFont(ofSize: 10.5 * scale, weight: .semibold),
-                .foregroundColor: NSColor.systemCyan.withAlphaComponent(opacity),
-                .paragraphStyle: para])
-        }
         let h = NSMutableAttributedString()
         h.append(part(Self.timeFormat.string(from: block.at), 0.4))
         h.append(part("  \(block.isMic ? "🎤" : "🔊") \(block.locale.hasPrefix("zh") ? "中" : "EN")", 0.4, .medium))
-        if let speaker = block.speaker {  // 分人開啟、diarizer 軌已回填的系統音講者
-            h.append(cyan("  " + speaker, 0.85))
-        }
         if let source = block.source {
             h.append(part("  " + String(source.prefix(28)), 0.5, .medium))
         }
