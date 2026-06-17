@@ -130,9 +130,6 @@ make publish   # make release + 傳上 GitHub Release（簽名私鑰不出本機
 ```bash
 ./build/Kilo.app/Contents/MacOS/Kilo --langs zh-TW,en-US   # 雙路信心擇優（預設）
 ./build/Kilo.app/Contents/MacOS/Kilo --lang ja-JP          # 單語模式
-./build/Kilo.app/Contents/MacOS/Kilo --diarize             # 實驗：系統音講者標 講者 A/B/C
-                                                           #   （獨立分人軌，講者標非同步疊上；
-                                                           #    --diarize-threshold 0.7 可調；首次啟用下載 CoreML 模型）
 ```
 
 ## 隱私 — 資料去哪

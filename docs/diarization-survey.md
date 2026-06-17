@@ -125,6 +125,22 @@ macOS 26 全 26.x 在你點名的整個表面(Speech / SpeechAnalyzer / SpeechTr
 
 ---
 
+## 6. 實機後記（2026-06-17）— async diart streaming 也驗證過，確認天花板
+
+把第 3/4 節「架構正確」那條真的做出來、實機驗過了。結論：**架構對了仍卡在 embedding 對相似人聲的天花板，threshold 救不了。**
+
+- **做法**（PR #102，已 revert）：獨立 `SpeakerDiarizer` 軌，每 ~10s 餵一 chunk 給 FluidAudio `DiarizerManager.performCompleteDiarization(atTime:)`（pyannote 3.1 CoreML，自己 frame-level 切段 + 跨 chunk 全域 speakerId），講者標非同步以時間戳疊回逐字稿。**這修掉了 #100 的粒度錯**（diarizer 自己切，不靠 ASR chunk）。
+- **TTS 自測**（跨性別英文）：切換點 ±0.1s、全域 ID 穩定，漂亮。
+- **真實中文雙人對話實機**：`flush` 每 10s 正常、`rms` 正常（音訊有進）、pyannote 每 flush 切 1–3 段 —— 但分群崩：
+  - `clusteringThreshold 0.7`（預設）→ 兩個持續對話的人**全併成一個講者**（~95% spk=1）。
+  - `0.5`（更嚴）→ 分出兩人，但切成 **30–65 秒的單一講者大塊**，跟不上真實細緻換手（且偶發 spurious 第三人）。
+  - 兩端都錯、中間值只是兩種錯混合 → **threshold 這根桿到頭。**
+- **根因**：相似同語言（中文、可能同性別）人聲的 pyannote embedding 區分度不足，抓不準換手點 —— 跟第 1/5 節預測一致。**非架構、非門檻、非 bug，是模型對相似人聲的可分性極限。**
+
+**裁決**：live 逐段分人三度撞牆（#100 粒度 → 0.7 併人 → 0.5 大塊），收掉。要分人只剩「離線批次（`OfflineDiarizerManager` + VBx，事後對整段錄音）」、「enrollment-first 認已知的人」或不做 —— 都不是 live overlay。
+
+---
+
 ### 主要來源
 
 - Apple: WWDC25 session 277; `developer.apple.com/tutorials/data/documentation/speech.json`(完整 symbol list)

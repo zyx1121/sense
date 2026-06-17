@@ -32,7 +32,6 @@ final class AgentController {
     private let agent: CodexAgent?
     private let metrics: MetricsStore
     private let polisher: TranscriptPolisher
-    private let speakers: SpeakerTimeline?
     private let isMeeting: () -> Bool
     private let sources = SourceTracker()
     private let screenCapturer = Capturer()
@@ -42,25 +41,13 @@ final class AgentController {
     private var convEpoch = 0
 
     init(store: TranscriptStore, agent: CodexAgent?, metrics: MetricsStore,
-         polisher: TranscriptPolisher, speakers: SpeakerTimeline? = nil,
+         polisher: TranscriptPolisher,
          isMeeting: @escaping () -> Bool = { false }) {
         self.store = store
         self.agent = agent
         self.metrics = metrics
         self.polisher = polisher
-        self.speakers = speakers
         self.isMeeting = isMeeting
-        if diarizationEnabled, let speakers {  // 分人軌的講者字母 → 逐字稿標籤（mic「我」在 store 端跳過）
-            store.speakerResolver = { [weak self] range in self?.resolveSpeaker(range, speakers: speakers) }
-        }
-    }
-
-    /// 某段（系統音）主講者 → 「對方 X」（會議）/「講者 X」。時間戳交集查 diarizer 軌時間軸。
-    private func resolveSpeaker(_ range: CMTimeRange?, speakers: SpeakerTimeline) -> String? {
-        guard let range,
-              let letter = speakers.dominantLetter(start: range.start.seconds, end: range.end.seconds)
-        else { return nil }
-        return (isMeeting() ? "對方 " : "講者 ") + letter
     }
 
     /// 辨識中的 volatile → overlay 灰字尾巴（打字機）。

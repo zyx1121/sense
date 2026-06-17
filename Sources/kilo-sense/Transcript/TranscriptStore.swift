@@ -101,7 +101,6 @@ struct TParagraph: Identifiable {
 struct PolishedBlock: Identifiable {
     let id = UUID()
     var source: String?       // app 來源（前景 app · 視窗標題）或會議 mic 的「我」
-    var speaker: String? = nil  // 分人字母「對方/講者 X」；diarizer 軌非同步回填（refreshSpeakers），mic 不標
     let locale: String        // bcp47 — 標 [中]/[EN]
     var paras: [TParagraph]   // 段落（各自帶譯文）；同塊續批 append
     let at: Date              // 開塊時間（標頭時間戳）
@@ -126,9 +125,6 @@ final class TranscriptStore {
     /// 已整理全文（不含講者標頭）— codex context、polisher 前文參考、長度計算用。
     var polished: String { polishedBlocks.map(\.text).joined(separator: "\n\n") }
     private(set) var pending: [PendingSegment] = []
-    /// 分人（--diarize）：依某段 timeRange 查主講者標籤（「對方/講者 X」）。AgentController 注入；
-    /// diarizer 軌每發布一批 segment 後呼 refreshSpeakers 全量回填（標籤晚到、非同步疊上）。
-    var speakerResolver: ((CMTimeRange?) -> String?)?
     private(set) var volatileShown = ""
     private var volatileTarget = ""
     /// mic（會議我這側）即時字 — 跟系統音的 volatile 不同槽，tail 另起一行標 🎤，不互相覆蓋。
@@ -163,16 +159,6 @@ final class TranscriptStore {
         lastPolishedLocale = nil
         transcriptEpoch += 1
         touchOverlay()
-    }
-
-    /// 分人軌（落後 ASR ~chunk 秒）每發布一批講者段後呼叫 — 用時間戳全量回填各塊的講者字母。
-    /// mic（我）不標；非「我」的塊按其 timeRange 查 dominant 講者。標籤晚到、會隨更多段疊上。
-    func refreshSpeakers() {
-        guard let resolver = speakerResolver else { return }
-        for i in polishedBlocks.indices {
-            let s = polishedBlocks[i].source == "我" ? nil : resolver(polishedBlocks[i].range)
-            if polishedBlocks[i].speaker != s { polishedBlocks[i].speaker = s }
-        }
     }
 
     // — overlay 縮放：⌘= / ⌘- / ⌘0（狀態欄選單同款入口），跨啟動記住 —
