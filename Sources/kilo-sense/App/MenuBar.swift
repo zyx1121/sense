@@ -8,7 +8,7 @@ import SwiftUI
 /// template NSImage：狀態欄自動明暗、SwiftUI 端用 foregroundStyle 染色。
 enum Brand {
     static let mark: NSImage = {
-        if let p = Bundle.main.path(forResource: "KiloMark", ofType: "pdf"),
+        if let p = Bundle.main.path(forResource: "MenubarIcon", ofType: "pdf"),
            let img = NSImage(contentsOfFile: p) {
             img.isTemplate = true
             return img
