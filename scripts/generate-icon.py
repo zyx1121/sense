@@ -30,8 +30,8 @@ TOP = (0x20, 0x23, 0x2A)
 BOT = (0x0C, 0x0D, 0x10)
 RADIUS = int(S * 0.225)
 LOGO_COVERAGE = 0.60
-# 選單列 mark:方形畫布,字符佔此比例、四周留白 —— 貼邊會被選單列切掉底部。
-MENUBAR_COVERAGE = 0.72
+# 選單列 mark:方形畫布,字符佔此比例、四周留白 —— 貼邊會被選單列切掉底部,留太多又顯小。
+MENUBAR_COVERAGE = 0.84
 
 
 def render_logo() -> Image.Image:
