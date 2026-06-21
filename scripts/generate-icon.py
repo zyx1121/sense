@@ -30,6 +30,8 @@ TOP = (0x20, 0x23, 0x2A)
 BOT = (0x0C, 0x0D, 0x10)
 RADIUS = int(S * 0.225)
 LOGO_COVERAGE = 0.60
+# 選單列 mark:方形畫布,字符佔此比例、四周留白 —— 貼邊會被選單列切掉底部。
+MENUBAR_COVERAGE = 0.72
 
 
 def render_logo() -> Image.Image:
@@ -95,21 +97,24 @@ def make_menubar_pdf() -> None:
     """
     with open(SVG) as f:
         svg = f.read().replace(' filter="url(#filter0_d_1_18)"', "")
-    # 緊 bbox:raster render → alpha → getbbox(px),換回 svg 座標。
+    # 緊 bbox:用 rsvg(跟最終輸出同一 renderer,量測才跟渲染一致 → 置中準)render → alpha getbbox。
     with tempfile.TemporaryDirectory() as tmp:
         src = os.path.join(tmp, "mark.svg")
         with open(src, "w") as f:
             f.write(svg)
-        subprocess.run(["qlmanage", "-t", "-s", str(S), "-o", tmp, src],
-                       check=True, capture_output=True)
-        raw = Image.open(os.path.join(tmp, "mark.svg.png")).convert("L")
-    l, t, r, b = raw.point(lambda v: 255 - v).getbbox()
+        meas = os.path.join(tmp, "measure.png")
+        subprocess.run(["rsvg-convert", "-w", str(S), src, "-o", meas], check=True)
+        raw = Image.open(meas).convert("RGBA")
+    l, t, r, b = raw.split()[-1].getbbox()
     vx0, vy0, vbw, vbh = (float(x) for x in re.search(r'viewBox="([\d.\s-]+)"', svg).group(1).split())
     sx, sy = vbw / raw.width, vbh / raw.height
-    nx, ny, nw, nh = vx0 + l * sx, vy0 + t * sy, (r - l) * sx, (b - t) * sy
-    svg = re.sub(r'viewBox="[^"]*"', f'viewBox="{nx:.2f} {ny:.2f} {nw:.2f} {nh:.2f}"', svg, count=1)
-    svg = re.sub(r'\swidth="[^"]*"', f' width="{nw:.2f}"', svg, count=1)
-    svg = re.sub(r'\sheight="[^"]*"', f' height="{nh:.2f}"', svg, count=1)
+    gx, gy, gw, gh = vx0 + l * sx, vy0 + t * sy, (r - l) * sx, (b - t) * sy
+    # 方形畫布 + padding:字符置中佔 MENUBAR_COVERAGE,四周留白(否則貼邊被選單列切底)。
+    side = max(gw, gh) / MENUBAR_COVERAGE
+    ox, oy = gx - (side - gw) / 2, gy - (side - gh) / 2
+    svg = re.sub(r'viewBox="[^"]*"', f'viewBox="{ox:.2f} {oy:.2f} {side:.2f} {side:.2f}"', svg, count=1)
+    svg = re.sub(r'\swidth="[^"]*"', f' width="{side:.2f}"', svg, count=1)
+    svg = re.sub(r'\sheight="[^"]*"', f' height="{side:.2f}"', svg, count=1)
     os.makedirs(os.path.dirname(OUT_MENUBAR), exist_ok=True)
     with tempfile.TemporaryDirectory() as tmp:
         tight = os.path.join(tmp, "tight.svg")
