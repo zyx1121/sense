@@ -15,7 +15,18 @@ enum AgentEvent: Sendable {
 /// - `--permission-mode bypassPermissions`：非互動自動核准工具（headless 不彈權限詢問）。
 /// - **不指定 --model**：繼承使用者預設模型（最強）。
 /// - history：`init` event 的 session_id 由呼叫端記下，下輪 `--resume <id>` 續同一個 session；
-///   workspace 方位指引由 cwd（~/.sense）下的 CLAUDE.md 自動載入，fresh / resume 都一致拿到。
+///   workspace 方位指引由 cwd（~/.sense）下的 CLAUDE.md 自動載入，fresh / resume 都一致拿到
+///   （這是 memory 機制、不是 settings，不受下面的隔離旗標影響，實測 fresh + resume 都仍讀得到）。
+///
+/// **環境隔離**（實測 `claude --help` 逐一驗證，不用印象）：不隔離的話 claude 預設會掛載使用者整套
+/// user-scope 設定（`~/.claude/plugins` 全部 marketplace plugin + `~/.claude.json` 的 MCP servers），
+/// 一輪 hello 就因為系統 prompt 灌爆到 $0.34、且工具面遠超這個「感官」agent 該碰的範圍。組合：
+/// - `--setting-sources project`：只吃 project/local 設定，排除 user scope（plugins/MCP 全部歸零 —
+///   實測 init event 的 `mcp_servers` / `plugins` 從一長串變 `[]`）
+/// - `--tools Read,Bash,Grep,Glob,Write`：白名單只留讀寫檔案 + 執行 + 搜尋，不用 `--bare`
+///   （`--bare` 連 CLAUDE.md auto-discovery 都關，會連工作區方位指引一起丟掉）
+/// - `--disable-slash-commands`：連內建 skills 都關（實測 skills 從一串內建清單變 `[]`）
+/// 三者疊加，實測穩態（prompt cache 命中後）單輪成本從 $0.34 降到 $0.008–0.02（同一句 hello 前後對比）。
 struct ClaudeAgent: Sendable {
     let workdir: String
 
@@ -61,7 +72,10 @@ struct ClaudeAgent: Sendable {
         }
 
         // 命令字串只含受控旗標（session id 已做字元集驗證），使用者自由文字全走 stdin。
-        var cmd = "claude -p --output-format stream-json --verbose --permission-mode bypassPermissions"
+        var cmd = """
+            claude -p --output-format stream-json --verbose --permission-mode bypassPermissions \
+            --setting-sources project --tools Read,Bash,Grep,Glob,Write --disable-slash-commands
+            """
         if let sessionID { cmd += " --resume '\(sessionID)'" }
 
         let proc = Process()
