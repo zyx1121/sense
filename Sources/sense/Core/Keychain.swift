@@ -1,7 +1,7 @@
 import Foundation
 import Security
 
-/// OpenAI API key 來源：環境變數優先（開發方便），否則 Keychain（service=kilo, account=openai）。
+/// OpenAI API key 來源：環境變數優先（開發方便），否則 Keychain（service=sense, account=openai）。
 /// 絕不寫進 code / repo。
 enum Keychain {
     static func openAIKey() -> String? {
@@ -10,7 +10,7 @@ enum Keychain {
         }
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: "kilo",
+            kSecAttrService as String: "sense",
             kSecAttrAccount as String: "openai",
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne,

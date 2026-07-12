@@ -34,7 +34,7 @@ final class KeyablePanel: NSPanel {
     }
 }
 
-/// 可拖動的 Kilo overlay：連續逐字稿 + 指令輸入 + agent 步驟 feed。floating、拖頂部標題列移動、高度動態。
+/// 可拖動的 Sense overlay：連續逐字稿 + 指令輸入 + agent 步驟 feed。floating、拖頂部標題列移動、高度動態。
 @MainActor
 final class SummaryWindow {
     private let panel: KeyablePanel
@@ -112,7 +112,7 @@ struct TranscriptView: View {
         VStack(alignment: .leading, spacing: 0) {
             // 唯一的視窗拖曳把手 — 背景拖曳已關（會吃掉拖曳選字），標題列全寬可拖
             HStack {
-                Text("Kilo")
+                Text("Sense")
                     .font(.system(size: sz(13), weight: .semibold))
                     .foregroundStyle(.white.opacity(0.85))
                 Spacer(minLength: 0)
@@ -145,7 +145,7 @@ struct TranscriptView: View {
                     .padding(.bottom, 6)
             }
 
-            // Kilo feed：跨 turn 歷史保留，自動跟到最新、可往回捲
+            // Sense feed：跨 turn 歷史保留，自動跟到最新、可往回捲
             if !store.feed.isEmpty {
                 ScrollViewReader { proxy in
                     ScrollView {
@@ -189,18 +189,18 @@ struct TranscriptView: View {
                 .background(.white.opacity(0.04))
             }
 
-            // 指令輸入 → codex agent；按住右 ⇧ 語音口述；相機 = 截游標所在螢幕變 chip
+            // 指令輸入 → claude agent；按住右 ⇧ 語音口述；相機 = 截游標所在螢幕變 chip
             HStack(spacing: 8) {
                 if store.pttRecording {
                     Image(systemName: "mic.fill")
                         .font(.system(size: sz(12))).foregroundStyle(.red.opacity(0.9))
                         .frame(width: iconGutter)
                 } else {
-                    KiloMark(size: sz(12))
+                    SenseMark(size: sz(12))
                         .foregroundStyle(.white.opacity(0.45))
                         .frame(width: iconGutter)  // 跟 feed step 的 icon 對齊同一條垂直線
                 }
-                TextField(store.pttRecording ? "聽你說…" : "問 Kilo，或叫它記錄…（按住右 ⇧ 說話）",
+                TextField(store.pttRecording ? "聽你說…" : "問 Sense，或叫它記錄…（按住右 ⇧ 說話）",
                           text: $store.inputDraft)
                     .textFieldStyle(.plain).font(.system(size: sz(12))).foregroundStyle(.white)
                     .onSubmit { controller.submit(store.inputDraft); store.inputDraft = "" }
@@ -212,7 +212,7 @@ struct TranscriptView: View {
                         .font(.system(size: sz(13))).foregroundStyle(.white.opacity(0.45))
                 }
                 .buttonStyle(.plain)
-                .help("截整個螢幕給 Kilo 看")
+                .help("截整個螢幕給 Sense 看")
             }
             .padding(.horizontal, 16).padding(.vertical, 9)
             .background(.white.opacity(0.06))
@@ -220,7 +220,7 @@ struct TranscriptView: View {
         .frame(width: sz(360))
         .fixedSize(horizontal: false, vertical: true)
         .glassEffect(in: .rect(cornerRadius: 16))
-        // Finder 拖檔進來 → chips（圖片走 -i、其他留路徑給 codex 讀）
+        // Finder 拖檔進來 → chips（圖片與檔案都以路徑給 claude 用 Read 讀）
         .overlay {
             if dropTargeted {
                 RoundedRectangle(cornerRadius: 16)
@@ -244,7 +244,7 @@ struct TranscriptView: View {
         .onChange(of: store.inputDraft) { _, _ in store.touchOverlay() }
     }
 
-    /// reply 裡的連結：http(s) 交給系統；相對路徑 / file 解析到 ~/.kilo 下用預設 app 開。
+    /// reply 裡的連結：http(s) 交給系統；相對路徑 / file 解析到 ~/.sense 下用預設 app 開。
     /// 沒這層的話 scheme-less URL 會直接丟給 LaunchServices → -50 開不起來。
     private func openFeedLink(_ url: URL) -> OpenURLAction.Result {
         if let scheme = url.scheme, scheme == "http" || scheme == "https" {
@@ -257,7 +257,7 @@ struct TranscriptView: View {
         // 相對路徑依序試 workdir 與 workdir/notes（agent 的筆記慣例放 notes/）
         let candidates = expanded.hasPrefix("/")
             ? [expanded]
-            : [kiloWorkdir + "/" + expanded, kiloWorkdir + "/notes/" + expanded]
+            : [senseWorkdir + "/" + expanded, senseWorkdir + "/notes/" + expanded]
         if let hit = candidates.first(where: { FileManager.default.fileExists(atPath: $0) }) {
             NSWorkspace.shared.open(URL(fileURLWithPath: hit))
             return .handled
@@ -280,7 +280,7 @@ struct TranscriptView: View {
     private func stepIcon(_ step: AgentStep) -> some View {
         switch step.kind {
         case .user:
-            KiloMark(size: sz(12)).foregroundStyle(.white.opacity(0.45))
+            SenseMark(size: sz(12)).foregroundStyle(.white.opacity(0.45))
         case .tool:
             if step.running {
                 ProgressView().controlSize(.mini)
@@ -290,8 +290,8 @@ struct TranscriptView: View {
                     .foregroundStyle(step.failed ? .red.opacity(0.8) : .white.opacity(0.35))
             }
         case .reply:
-            // Kilo 說話的標記（cyan），跟 user 的灰 mark 形成你問它答的對話節奏
-            KiloMark(size: sz(12)).foregroundStyle(.cyan.opacity(0.9))
+            // Sense 說話的標記（cyan），跟 user 的灰 mark 形成你問它答的對話節奏
+            SenseMark(size: sz(12)).foregroundStyle(.cyan.opacity(0.9))
         case .error:
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: sz(10))).foregroundStyle(.orange.opacity(0.9))

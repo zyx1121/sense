@@ -17,13 +17,13 @@ func dumpLocales() async {
 
 func logErr(_ s: String) { FileHandle.standardError.write(Data((s + "\n").utf8)) }
 
-/// codex agent 的 workspace；reply 裡的相對路徑連結也解析到這底下。
-let kiloWorkdir = NSHomeDirectory() + "/.kilo"
+/// claude agent 的 workspace；reply 裡的相對路徑連結也解析到這底下。
+let senseWorkdir = NSHomeDirectory() + "/.sense"
 
 /// polish / translate 用的 OpenAI 模型 — 預設 gpt-5.4-mini。盲測中文語境/語法錯字 mini 14/14、
 /// nano 只 6/14 且輪間不穩（在/再、的/得、時做→實作 修不掉，連簡繁殘渣都漏）；nano 英文好認的
 /// homophone 行但真實 garbled/專名一樣漏。`--polish-model gpt-5.4-nano` 省 ~72% 成本（品質換成本，
-/// 中文錯字會漏）。codex 問答另用 gpt-5.4（複雜任務）。
+/// 中文錯字會漏）。agent 問答走 claude CLI，繼承使用者的預設模型（最強），與此潤稿模型無關。
 let polishModel: String = {
     let args = CommandLine.arguments
     if let i = args.firstIndex(of: "--polish-model"), args.indices.contains(i + 1) {
@@ -32,16 +32,16 @@ let polishModel: String = {
     return "gpt-5.4-mini"
 }()
 
-/// 確保 ~/.kilo/AGENTS.md 存在 — codex 以 ~/.kilo 為 workdir，會自動載它當工作區方位指引
-/// （佈局 + 「過去先 grep transcripts」）。只在缺檔時寫：使用者既有的 AGENTS.md 不覆寫。
-func seedAgentsFile() {
-    let path = kiloWorkdir + "/AGENTS.md"
+/// 確保 ~/.sense/CLAUDE.md 存在 — claude 以 ~/.sense 為 cwd，會自動載它當工作區方位指引
+/// （佈局 + 「過去先 grep transcripts」）。只在缺檔時寫：使用者既有的 CLAUDE.md 不覆寫。
+func seedWorkspaceGuide() {
+    let path = senseWorkdir + "/CLAUDE.md"
     guard !FileManager.default.fileExists(atPath: path) else { return }
-    try? FileManager.default.createDirectory(atPath: kiloWorkdir, withIntermediateDirectories: true)
+    try? FileManager.default.createDirectory(atPath: senseWorkdir, withIntermediateDirectories: true)
     let content = """
-        # Kilo workspace
+        # Sense workspace
 
-        This directory (`~/.kilo`) is your workspace and Kilo's memory.
+        This directory (`~/.sense`) is your workspace and Sense's memory.
 
         - `transcripts/YYYY-MM-DD.md` — transcript history; each block is headed \
         `## [HH:mm] source` (the app + window title, or `我` for the user's own mic)
@@ -59,7 +59,7 @@ if CommandLine.arguments.contains("--locales") {
     exit(0)
 }
 
-// 系統音訊 → 瀏海字幕 + 連續逐字稿（小模型即時整理）；shake 圈選畫面 + codex agent 分析
+// 系統音訊 → 瀏海字幕 + 連續逐字稿（小模型即時整理）；shake 圈選畫面 + claude agent 分析
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let captions = CaptionModel()
@@ -77,8 +77,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var meetingMode: MeetingMode?
 
     func applicationDidFinishLaunching(_: Notification) {
-        Task.detached { _ = CodexAgent.shellPath }  // 背景預熱 codex PATH 解析（GUI app 貧瘠環境用）
-        seedAgentsFile()  // 缺檔才寫；codex 自動載 ~/.kilo/AGENTS.md 當工作區方位指引
+        Task.detached { _ = ClaudeAgent.shellPath }  // 背景預熱 claude PATH 解析（GUI app 貧瘠環境用）
+        seedWorkspaceGuide()  // 缺檔才寫；claude 自動載 ~/.sense/CLAUDE.md 當工作區方位指引
         statusBar = StatusBarController(metrics: metrics)  // 選單列入口（控制 app 的唯一處）
         showOverlay()
         showSummaryWindow()
@@ -102,7 +102,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// 按住右 ⇧ 對 Kilo 說話 — 口述語言取 --langs 第一個（你自己講話的主語言）。
+    /// 按住右 ⇧ 對 Sense 說話 — 口述語言取 --langs 第一個（你自己講話的主語言）。
     private func startPushToTalk() {
         let ptt = PushToTalk(store: transcript, locale: Locale(identifier: parsedLangs()[0]))
         ptt.start()
@@ -119,7 +119,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
     }
 
-    /// 晃游標 → 圈選畫面元素給 Kilo 看（dim + spotlight + click capture）。
+    /// 晃游標 → 圈選畫面元素給 Sense 看（dim + spotlight + click capture）。
     private func startShakeCapture() {
         let shake = ShakeCapture(store: transcript)
         shake.onSelectingChange = { [weak self] on in
@@ -150,8 +150,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showSummaryWindow() {
-        let agent = Keychain.openAIKey().map {
-            CodexAgent(workdir: kiloWorkdir, apiKey: $0)
+        // agent = claude CLI（用本機既有登入，不需 key）；缺 CLI → agent 停用，字幕 + 逐字稿照常
+        let agent: ClaudeAgent? = ClaudeAgent.isAvailable ? ClaudeAgent(workdir: senseWorkdir) : nil
+        if agent == nil {
+            logErr("⚠️ 找不到 claude CLI（PATH 上沒有 claude）— Sense agent 停用，字幕 + 逐字稿照常")
         }
         let polisher = TranscriptPolisher(store: transcript, archiver: TranscriptArchiver(), metrics: metrics)
         logErr("逐字稿整理模型：\(polisher.backendName)")
@@ -175,7 +177,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func startPipeline() {
         if Keychain.openAIKey() == nil {
-            logErr("⚠️ 沒有 OpenAI key（OPENAI_API_KEY 或 Keychain service=kilo account=openai）— Kilo agent 停用，字幕 + 逐字稿照常")
+            logErr("⚠️ 沒有 OpenAI key（OPENAI_API_KEY 或 Keychain service=sense account=openai）— 逐字稿整理停用（原文直出），字幕與 agent 照常")
         }
         guard let controller = agentController else { return }
 

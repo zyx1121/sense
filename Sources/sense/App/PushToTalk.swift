@@ -2,7 +2,7 @@ import AppKit
 import AVFoundation
 import Foundation
 
-/// 按住右 Shift 對 Kilo 說話：mic → 即時轉錄 → overlay 輸入框（volatile 即時跟打，放開定格可改可送）。
+/// 按住右 Shift 對 Sense 說話：mic → 即時轉錄 → overlay 輸入框（volatile 即時跟打，放開定格可改可送）。
 /// 不持續錄音 — 按住才開 mic、放開即停；辨識引擎首次按下時暖機，之後常駐（免每次等 setUp）。
 @MainActor
 final class PushToTalk {

@@ -1,7 +1,7 @@
 # PRODUCT = SwiftPM 產物 / binary（專案名，不變）；APP_NAME = 對外應用名（.app / 顯示名 / DMG）
-PRODUCT    := kilo-sense
-APP_NAME   := Kilo
-BUNDLE_ID  := tw.zyx.kilo
+PRODUCT    := sense
+APP_NAME   := Sense
+BUNDLE_ID  := tw.zyx.sense
 BIN_PATH   := .build/release/$(PRODUCT)
 APP_BUNDLE := build/$(APP_NAME).app
 CONTENTS   := $(APP_BUNDLE)/Contents
@@ -12,7 +12,7 @@ DMG        := build/$(APP_NAME)-$(VERSION).dmg
 SIGN_ID ?= -
 # 分發用 — Developer ID Application cert + notarytool keychain profile，都放 Makefile.local
 DEV_ID_APP ?=
-NOTARY_PROFILE ?= kilo-notary
+NOTARY_PROFILE ?= sense-notary
 -include Makefile.local
 
 .PHONY: all build locales bundle run clean rebuild logs install dmg release publish
@@ -34,7 +34,7 @@ bundle: build
 	@cp Resources/Info.plist $(CONTENTS)/Info.plist
 	@cp Resources/AppIcon.icns $(CONTENTS)/Resources/AppIcon.icns
 	@cp Resources/MenubarIcon.pdf $(CONTENTS)/Resources/MenubarIcon.pdf
-	@codesign --force --options runtime --entitlements Resources/kilo-sense.entitlements --sign $(SIGN_ID) $(APP_BUNDLE)
+	@codesign --force --options runtime --entitlements Resources/sense.entitlements --sign $(SIGN_ID) $(APP_BUNDLE)
 	@echo "[OK] $(APP_BUNDLE) signed with $(SIGN_ID)"
 
 run: bundle
@@ -44,7 +44,7 @@ rebuild: clean bundle
 
 # 安裝到 /Applications（開機自啟與穩定 TCC 都需要 app 在這裡）
 install: bundle
-	@rm -rf /Applications/kilo-sense.app   # 清舊名安裝（rename 遷移）
+	@rm -rf /Applications/Kilo.app   # 清 Kilo→Sense rename 前的舊安裝（TCC / 開機自啟遷移）
 	@rm -rf /Applications/$(APP_NAME).app
 	@cp -R $(APP_BUNDLE) /Applications/
 	@echo "[OK] installed to /Applications/$(APP_NAME).app"
@@ -65,7 +65,7 @@ release: build
 	@cp Resources/Info.plist $(CONTENTS)/Info.plist
 	@cp Resources/AppIcon.icns $(CONTENTS)/Resources/AppIcon.icns
 	@cp Resources/MenubarIcon.pdf $(CONTENTS)/Resources/MenubarIcon.pdf
-	@codesign --force --options runtime --timestamp --entitlements Resources/kilo-sense.entitlements --sign "$(DEV_ID_APP)" $(APP_BUNDLE)
+	@codesign --force --options runtime --timestamp --entitlements Resources/sense.entitlements --sign "$(DEV_ID_APP)" $(APP_BUNDLE)
 	@codesign --verify --strict --verbose=2 $(APP_BUNDLE)
 	@echo "→ notarizing app（首次數分鐘）…"
 	@ditto -c -k --keepParent $(APP_BUNDLE) build/$(APP_NAME)-notarize.zip
@@ -85,7 +85,7 @@ publish: release
 
 # 即時 Telemetry（asr / polish / agent / shake）
 logs:
-	log stream --info --predicate 'subsystem == "tw.zyx.kilo"' --style compact
+	log stream --info --predicate 'subsystem == "tw.zyx.sense"' --style compact
 
 clean:
 	rm -rf .build build

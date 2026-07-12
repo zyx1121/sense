@@ -13,14 +13,14 @@ enum Brand {
             img.isTemplate = true
             return img
         }
-        let fallback = NSImage(systemSymbolName: "sparkle", accessibilityDescription: "Kilo") ?? NSImage()
+        let fallback = NSImage(systemSymbolName: "sparkle", accessibilityDescription: "Sense") ?? NSImage()
         fallback.isTemplate = true
         return fallback
     }()
 }
 
 /// feed / 輸入框用的品牌 mark，可 .foregroundStyle 染色、保持比例。
-struct KiloMark: View {
+struct SenseMark: View {
     var size: CGFloat
     var body: some View {
         Image(nsImage: Brand.mark)
@@ -47,7 +47,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     /// 快捷鍵實際由 KeyablePanel.performKeyEquivalent 處理（overlay 是 key window 時），
     /// 選單項目標 ⌘= / ⌘- / ⌘0 當功能欄入口與提示。
     var onZoom: ((CGFloat?) -> Void)?
-    /// 清除 Kilo 對話（main.swift 接 AgentController.clearConversation；輸入框打 /clear 同效）。
+    /// 清除 Sense 對話（main.swift 接 AgentController.clearConversation；輸入框打 /clear 同效）。
     var onClearConversation: (() -> Void)?
 
     private var usageItem: NSMenuItem?  // 本 session 用量行，每次打開選單刷新數字
@@ -73,7 +73,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private func rebuildMenu() {
         let menu = NSMenu()
         menu.delegate = self
-        let title = NSMenuItem(title: "Kilo", action: nil, keyEquivalent: "")
+        let title = NSMenuItem(title: "Sense", action: nil, keyEquivalent: "")
         title.isEnabled = false
         menu.addItem(title)
 
@@ -124,15 +124,15 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     }
 
     @objc private func openTranscripts() {
-        let dir = kiloWorkdir + "/transcripts"
+        let dir = senseWorkdir + "/transcripts"
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         NSWorkspace.shared.open(URL(fileURLWithPath: dir))
     }
 
-    /// 用量報告 → ~/.kilo/usage-report.md 並開啟（可直接貼給老闆）。
+    /// 用量報告 → ~/.sense/usage-report.md 並開啟（可直接貼給老闆）。
     @objc private func exportUsageReport() {
         let md = metrics.reportMarkdown(generatedAt: Date())
-        let path = kiloWorkdir + "/usage-report.md"
+        let path = senseWorkdir + "/usage-report.md"
         do {
             try md.write(toFile: path, atomically: true, encoding: .utf8)
             NSWorkspace.shared.open(URL(fileURLWithPath: path))

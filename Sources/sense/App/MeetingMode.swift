@@ -83,7 +83,7 @@ final class MeetingMode {
         }
         Telemetry.meeting.info("final conf=\(r.confidence ?? -1, format: .fixed(precision: 2), privacy: .public) text=\(String(r.text.prefix(30)), privacy: .public)")
         guard (r.confidence ?? 1) >= noiseFloor else { return }
-        // PTT 期間（含尾段窗）你在對 Kilo 說話 — 那是指令不是會議內容，讓給輸入框
+        // PTT 期間（含尾段窗）你在對 Sense 說話 — 那是指令不是會議內容，讓給輸入框
         guard !store.pttRecording, Date() >= store.pttTailUntil else {
             Telemetry.meeting.info("final yielded to ptt")
             return

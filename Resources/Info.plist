@@ -3,15 +3,15 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleIdentifier</key>
-	<string>tw.zyx.kilo</string>
+	<string>tw.zyx.sense</string>
 	<key>CFBundleName</key>
-	<string>Kilo</string>
+	<string>Sense</string>
 	<key>CFBundleExecutable</key>
-	<string>Kilo</string>
+	<string>Sense</string>
 	<key>CFBundleIconFile</key>
 	<string>AppIcon</string>
 	<key>CFBundleDisplayName</key>
-	<string>Kilo</string>
+	<string>Sense</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -27,8 +27,8 @@
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSScreenCaptureUsageDescription</key>
-	<string>Kilo 需要螢幕錄製權限來擷取系統音訊（你正在聽的影片 / 通話）做即時轉錄。</string>
+	<string>Sense 需要螢幕錄製權限來擷取系統音訊（你正在聽的影片 / 通話）做即時轉錄。</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Kilo 需要麥克風權限：按住右 Shift 對 Kilo 說話（語音輸入），以及會議模式錄下你這側的發言。</string>
+	<string>Sense 需要麥克風權限：按住右 Shift 對 Sense 說話（語音輸入），以及會議模式錄下你這側的發言。</string>
 </dict>
 </plist>

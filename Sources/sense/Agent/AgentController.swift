@@ -24,23 +24,23 @@ enum QuickAction {
     }
 }
 
-/// overlay input → codex agent。逐字稿存在 TranscriptStore（也是 codex 的 context）。
-/// 對話 history：記住 codex 的 thread id，每輪 `exec resume` 續同一個 session。
+/// overlay input → claude agent。逐字稿存在 TranscriptStore（也是 claude 的 context）。
+/// 對話 history：記住 claude 的 thread id，每輪 `exec resume` 續同一個 session。
 @MainActor
 final class AgentController {
     private let store: TranscriptStore
-    private let agent: CodexAgent?
+    private let agent: ClaudeAgent?
     private let metrics: MetricsStore
     private let polisher: TranscriptPolisher
     private let isMeeting: () -> Bool
     private let sources = SourceTracker()
     private let screenCapturer = Capturer()
-    private var threadID: String?  // codex session，app 重啟歸零
+    private var threadID: String?  // claude session，app 重啟歸零
     /// 對話世代 — /clear 遞增；飛行中 turn 的 .thread event 帶舊世代回來時
     /// 不寫回 threadID（否則 submit 後 0.5-2s 內 /clear 會被默默復活 session）。
     private var convEpoch = 0
 
-    init(store: TranscriptStore, agent: CodexAgent?, metrics: MetricsStore,
+    init(store: TranscriptStore, agent: ClaudeAgent?, metrics: MetricsStore,
          polisher: TranscriptPolisher,
          isMeeting: @escaping () -> Bool = { false }) {
         self.store = store
@@ -55,7 +55,7 @@ final class AgentController {
         store.setVolatile(text)
     }
 
-    /// 每段定稿進逐字稿（顯示 + codex context），並戳 polisher 整理。
+    /// 每段定稿進逐字稿（顯示 + claude context），並戳 polisher 整理。
     /// 帶 timeRange 進 pending（記音訊時長 → 花費分母）、fallback 來源（前景 app）；
     /// locale 跟著進 pending（整理選對指令語言）。
     func appendFinal(_ text: String, locale: String, timeRange: CMTimeRange? = nil) {
@@ -73,7 +73,7 @@ final class AgentController {
         polisher.nudge()
     }
 
-    /// 使用者在 overlay 打的指令 → codex（連同最近逐字稿 + 全部圈選素材，送出即消耗）。
+    /// 使用者在 overlay 打的指令 → claude（連同最近逐字稿 + 全部圈選素材，送出即消耗）。
     func submit(_ instruction: String) {
         let instruction = instruction.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !instruction.isEmpty else { return }
@@ -86,7 +86,7 @@ final class AgentController {
         run(instruction: instruction, attachments: attachments, label: instruction)
     }
 
-    /// 重開對話：清 feed + 畫面逐字稿、丟 codex session — 下一輪 fresh session
+    /// 重開對話：清 feed + 畫面逐字稿、丟 claude session — 下一輪 fresh session
     ///（歸檔的逐字稿不動，圈選素材保留）。
     func clearConversation() {
         convEpoch += 1
@@ -108,8 +108,8 @@ final class AgentController {
     }
 
     /// Finder 拖進 overlay 的檔案 → chips。圖片檔 stage 進 captures 直接走 -i（零解碼 —
-    /// 48MP 照片在主執行緒 decode+re-encode 會凍 4 秒），其他檔案留路徑讓 codex 自己讀。
-    /// 瀏覽器拖進來的連結（dropDestination 連 public.url 都收）變文字 chip，codex 自己抓。
+    /// 48MP 照片在主執行緒 decode+re-encode 會凍 4 秒），其他檔案留路徑讓 claude 自己讀。
+    /// 瀏覽器拖進來的連結（dropDestination 連 public.url 都收）變文字 chip，claude 自己抓。
     func addDroppedFiles(_ urls: [URL]) {
         for url in urls {
             guard url.isFileURL else {
@@ -127,10 +127,10 @@ final class AgentController {
         }
     }
 
-    /// 拖入的圖片檔 clone 進 ~/.kilo/captures（APFS COW，免解碼免等）— 原檔之後被移走
-    /// 也不影響；檔名自家產（UUID + 淨化過的副檔名），拼進 codex -i 的單引號才安全。
+    /// 拖入的圖片檔 clone 進 ~/.sense/captures（APFS COW，免解碼免等）— 原檔之後被移走
+    /// 也不影響；檔名自家產（UUID + 淨化過的副檔名），拼進 claude -i 的單引號才安全。
     private func stageImage(_ url: URL) -> String? {
-        let dir = kiloWorkdir + "/captures"
+        let dir = senseWorkdir + "/captures"
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         let ext = url.pathExtension.filter { $0.isLetter || $0.isNumber }
         let dest = dir + "/drop-\(UUID().uuidString)" + (ext.isEmpty ? "" : ".\(ext)")
@@ -161,12 +161,12 @@ final class AgentController {
         }
     }
 
-    /// 組裝 + 跑一輪：文字素材進 prompt、截圖存檔走 -i。
+    /// 組裝 + 跑一輪：文字素材進 prompt、截圖存檔後把路徑餵給 claude 自己 Read。
     private func run(instruction: String, attachments: [Asset], label: String) {
         guard !store.thinking else { return }  // turn-at-a-time
         store.beginTurn(label)
         guard let agent else {
-            store.appendError("沒有 codex agent（缺 OpenAI key）")
+            store.appendError("找不到 claude CLI（請先安裝 Claude Code：claude.ai/code）")
             return
         }
 
@@ -178,13 +178,13 @@ final class AgentController {
         if !texts.isEmpty {
             fullInstruction += "\n\n（使用者圈選的畫面文字）\n" + texts.joined(separator: "\n---\n")
         }
-        // .file 分流：只有自家 stage 出來的 captures 路徑能進 -i（引號拼接安全），
-        // 其他一律列路徑讓 codex 自己讀（走 env，不碰命令字串）
+        // .file 分流：自家 stage 出來的 captures（圖）併進 imagePaths 當截圖餵，
+        // 其他檔案列路徑進 prompt，都讓 claude 用 Read 工具自己讀
         var stagedImages: [String] = []
         var files: [String] = []
         for a in attachments {
             guard case .file(let p) = a.kind else { continue }
-            if p.hasPrefix(kiloWorkdir + "/captures/") { stagedImages.append(p) } else { files.append(p) }
+            if p.hasPrefix(senseWorkdir + "/captures/") { stagedImages.append(p) } else { files.append(p) }
         }
         if !files.isEmpty {
             fullInstruction += "\n\n（使用者拖入的檔案，用工具直接讀這些路徑）\n" + files.joined(separator: "\n")
@@ -222,17 +222,17 @@ final class AgentController {
             if let error = result.error {
                 store.appendError(error.localizedDescription)
             } else if !result.gotMessage {
-                store.appendError("codex 沒回應")
+                store.appendError("claude 沒回應")
             }
-            metrics.recordCodex(latency: Date().timeIntervalSince(start),
+            metrics.recordAgent(latency: Date().timeIntervalSince(start),
                                 failed: result.error != nil)
             store.setThinking(false)
         }
     }
 
-    /// 圈選截圖存到 ~/.kilo/captures/（codex 之後也能自己讀），回傳路徑。
+    /// 圈選截圖存到 ~/.sense/captures/（claude 之後也能自己讀），回傳路徑。
     private func saveImages(_ attachments: [Asset]) -> [String] {
-        let dir = kiloWorkdir + "/captures"
+        let dir = senseWorkdir + "/captures"
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         return attachments.compactMap { a in
             guard let data = a.pngData() else { return nil }
@@ -247,8 +247,8 @@ final class AgentController {
         }
     }
 
-    /// 跑一輪 codex turn，事件直灌 feed；回傳是否收到回覆與錯誤。
-    private func runTurn(_ agent: CodexAgent, instruction: String, transcript: String,
+    /// 跑一輪 claude turn，事件直灌 feed；回傳是否收到回覆與錯誤。
+    private func runTurn(_ agent: ClaudeAgent, instruction: String, transcript: String,
                          resume: String?, images: [String] = [],
                          epoch: Int) async -> (gotMessage: Bool, error: Error?) {
         var got = false
@@ -263,8 +263,6 @@ final class AgentController {
                 case .message(let text):
                     got = true
                     store.appendReply(text)
-                case .usage(let p, let cached, let comp):
-                    metrics.recordLLMUsage(prompt: p, cached: cached, completion: comp)  // Kilo 問答也計量
                 }
             }
             return (got, nil)

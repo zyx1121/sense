@@ -2,11 +2,11 @@
 import PackageDescription
 
 let package = Package(
-    name: "kilo-sense",
+    name: "sense",
     platforms: [.macOS("26.0")], // SpeechAnalyzer / SpeechTranscriber 需 macOS 26
     targets: [
         .executableTarget(
-            name: "kilo-sense",
-            path: "Sources/kilo-sense")
+            name: "sense",
+            path: "Sources/sense")
     ]
 )

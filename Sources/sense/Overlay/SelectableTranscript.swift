@@ -16,7 +16,7 @@ struct SelectableTranscript: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(store: store) }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let tv = KiloTextView(frame: .zero)
+        let tv = SenseTextView(frame: .zero)
         tv.coordinator = context.coordinator
         tv.isEditable = false
         tv.isSelectable = true
@@ -125,7 +125,7 @@ struct SelectableTranscript: NSViewRepresentable {
 
 /// 逐字稿專用 NSTextView：右鍵選單完全自訂 — 複製(選取) / 複製逐字稿 / 清除，
 /// 砍掉系統文字選單的 Look Up / Translate / Writing Tools / Open / Show in Finder…
-private final class KiloTextView: NSTextView {
+private final class SenseTextView: NSTextView {
     weak var coordinator: SelectableTranscript.Coordinator?
 
     override func menu(for event: NSEvent) -> NSMenu? {
