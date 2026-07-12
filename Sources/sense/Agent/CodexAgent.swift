@@ -28,7 +28,7 @@ struct CodexAgent: Sendable {
         let fallback = ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin"
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        proc.arguments = ["-ilc", "echo __KILOPATH__$PATH"]  // 標記前綴：從 .zshrc 的 history/plugin 雜訊裡撈 PATH 行
+        proc.arguments = ["-ilc", "echo __SENSEPATH__$PATH"]  // 標記前綴：從 .zshrc 的 history/plugin 雜訊裡撈 PATH 行
         let pipe = Pipe()
         proc.standardOutput = pipe
         proc.standardError = FileHandle.nullDevice
@@ -36,8 +36,8 @@ struct CodexAgent: Sendable {
         guard (try? proc.run()) != nil else { return fallback }
         proc.waitUntilExit()
         let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        guard let line = out.split(separator: "\n").first(where: { $0.contains("__KILOPATH__") }),
-              let range = line.range(of: "__KILOPATH__") else { return fallback }
+        guard let line = out.split(separator: "\n").first(where: { $0.contains("__SENSEPATH__") }),
+              let range = line.range(of: "__SENSEPATH__") else { return fallback }
         let path = String(line[range.upperBound...])
         return path.isEmpty ? fallback : path
     }()
@@ -47,23 +47,23 @@ struct CodexAgent: Sendable {
                 images: [String] = []) -> AsyncThrowingStream<CodexEvent, Error> {
         let (events, cont) = AsyncThrowingStream<CodexEvent, Error>.makeStream()
 
-        // workspace 方位指引（佈局 + 「過去先 grep transcripts」）改由 ~/.kilo/AGENTS.md 提供 —
-        // codex 以 ~/.kilo 為 workdir 自動載入，fresh / resume 都一致拿到，使用者也可自行編修。
+        // workspace 方位指引（佈局 + 「過去先 grep transcripts」）改由 ~/.sense/AGENTS.md 提供 —
+        // codex 以 ~/.sense 為 workdir 自動載入，fresh / resume 都一致拿到，使用者也可自行編修。
         // 逐字稿包進 prompt（resume 時 codex 記得舊的，但新語音只在這份 tail 裡）
         let prompt = transcript.isEmpty
             ? instruction
             : "\(instruction)\n\n（最新逐字稿片段，可能與前次部分重疊）\n\(transcript)"
 
-        // 截圖走 -i（fresh / resume 都收）；path 是自家產的 ~/.kilo/captures/*.png，單引號包安全
+        // 截圖走 -i（fresh / resume 都收）；path 是自家產的 ~/.sense/captures/*.png，單引號包安全
         let imageFlags = images.map { "-i '\($0)'" }.joined(separator: " ")
         let common = "\(imageFlags) -m \(model) -c model_reasoning_effort=low -c approval_policy=never"
         let cmd: String
         if let threadID {
-            cmd = "codex exec resume '\(threadID)' --json --skip-git-repo-check \(common) \"$KILO_PROMPT\""
+            cmd = "codex exec resume '\(threadID)' --json --skip-git-repo-check \(common) \"$SENSE_PROMPT\""
         } else {
             cmd = """
                 codex exec --json -C '\(workdir)' --skip-git-repo-check \
-                -s workspace-write \(common) "$KILO_PROMPT"
+                -s workspace-write \(common) "$SENSE_PROMPT"
                 """
         }
 
@@ -72,7 +72,7 @@ struct CodexAgent: Sendable {
         proc.arguments = ["-lc", cmd]
         var env = ProcessInfo.processInfo.environment
         env["PATH"] = Self.shellPath  // 注入 interactive shell 的完整 PATH，GUI app 才找得到 codex / node
-        env["KILO_PROMPT"] = prompt
+        env["SENSE_PROMPT"] = prompt
         if let apiKey { env["CODEX_API_KEY"] = apiKey }
         proc.environment = env
 

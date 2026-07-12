@@ -8,7 +8,7 @@ import Foundation
 final class PolishPairLogger {
     private let path: String
 
-    init(root: String = kiloWorkdir) {
+    init(root: String = senseWorkdir) {
         let dir = root + "/training"
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         self.path = dir + "/polish-pairs.jsonl"

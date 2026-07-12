@@ -13,7 +13,7 @@ enum SystemAudioError: Error {
 final class SystemAudioSource: NSObject, AudioSource, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
     private var stream: SCStream?
     private var continuation: AsyncStream<PCMBuffer>.Continuation?
-    private let sampleQueue = DispatchQueue(label: "tw.zyx.kilo.systemaudio")
+    private let sampleQueue = DispatchQueue(label: "tw.zyx.sense.systemaudio")
 
     func start() async throws -> AsyncStream<PCMBuffer> {
         guard CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess() else {

@@ -3,7 +3,7 @@ import CoreGraphics
 import Foundation
 
 /// 選取模式時攔截全域點擊（CGEventTap，需 Accessibility）：
-/// 左鍵 = 捕捉游標下元素、右鍵 = 結束選取；passThroughRect（kilo 自己的視窗）放行。
+/// 左鍵 = 捕捉游標下元素、右鍵 = 結束選取；passThroughRect（sense 自己的視窗）放行。
 /// Ported from zyx1121/shake。
 final class ClickInterceptor: @unchecked Sendable {
     private let onLeftDown: @Sendable (CGPoint) -> Void

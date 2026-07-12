@@ -1,7 +1,7 @@
 import CoreMedia
 import Foundation
 
-/// Kilo feed 的一個步驟：使用者指令 / tool 執行 / 回應 / 錯誤。
+/// Sense feed 的一個步驟：使用者指令 / tool 執行 / 回應 / 錯誤。
 struct AgentStep: Identifiable, Equatable {
     enum Kind: Equatable { case user, tool, reply, error }
     let id: String
@@ -115,7 +115,7 @@ struct PolishedBlock: Identifiable {
     var durationSeconds: Double? { range.map { $0.duration.seconds } }
 }
 
-/// 逐字稿連續文件流 + Kilo agent 步驟 feed。window 顯示、codex agent 讀來思考。
+/// 逐字稿連續文件流 + Sense agent 步驟 feed。window 顯示、codex agent 讀來思考。
 /// 逐字稿三層：polished（小模型整理過）→ pending（定稿待整理，帶 locale）→ volatile（辨識中，打字機推進）。
 @MainActor @Observable
 final class TranscriptStore {
@@ -145,14 +145,14 @@ final class TranscriptStore {
     // — PTT（按住右 ⇧ 說話）：草稿放 store 才能讓語音注入；view 雙向綁定同一份 —
     var inputDraft = ""
     var pttRecording = false
-    /// PTT 放開後的尾段窗（遲到 final 還算 PTT 的）— 會議模式靠這個避開「對 Kilo 說的話進會議記錄」。
+    /// PTT 放開後的尾段窗（遲到 final 還算 PTT 的）— 會議模式靠這個避開「對 Sense 說的話進會議記錄」。
     var pttTailUntil = Date.distantPast
 
     /// 畫面世代 — 「清除逐字稿」遞增；清除瞬間還在飛的 polish 批帶著舊世代回來，
     /// 只進歸檔不再上畫面（不擋歸檔，擋復活）。
     private(set) var transcriptEpoch = 0
 
-    /// 清畫面開新段落：已歸檔的不動（~/.kilo/transcripts 永遠完整），只清顯示與待整理層。
+    /// 清畫面開新段落：已歸檔的不動（~/.sense/transcripts 永遠完整），只清顯示與待整理層。
     func clearTranscript() {
         volatileTask?.cancel(); volatileTask = nil
         polishedBlocks = []; pending = []; volatileTarget = ""; volatileShown = ""; micVolatile = ""
@@ -401,7 +401,7 @@ final class TranscriptStore {
         }
     }
 
-    // MARK: - Kilo feed
+    // MARK: - Sense feed
 
     /// feed 內容長度（含打字機進度），view 拿來觸發 auto-scroll。
     var feedLength: Int { feed.reduce(feed.count) { $0 + $1.shownChars } }
@@ -442,7 +442,7 @@ final class TranscriptStore {
 
     func setThinking(_ b: Bool) { thinking = b }
 
-    /// 清空 Kilo 對話 feed（/clear、右鍵「清除對話」）— 步驟與打字機歸零；逐字稿與圈選素材不動。
+    /// 清空 Sense 對話 feed（/clear、右鍵「清除對話」）— 步驟與打字機歸零；逐字稿與圈選素材不動。
     /// 還在飛的 turn 事件會落進清空後的 feed — 接受（那是新對話前最後的殘響）。
     func clearFeed() {
         replyTask?.cancel(); replyTask = nil

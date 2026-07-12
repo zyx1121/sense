@@ -1,8 +1,8 @@
 import Foundation
 
 /// 即時可觀測指標 + 跨 session 持久化的 LLM 用量帳。
-/// 本 session（app 開機後歸零）給「單部影片成本」對比；累計（~/.kilo/usage-state.json）
-/// 跨重啟不丟，給老闆看總帳。report 每次用量變動 debounce 寫 ~/.kilo/usage-report.md，
+/// 本 session（app 開機後歸零）給「單部影片成本」對比；累計（~/.sense/usage-state.json）
+/// 跨重啟不丟，給老闆看總帳。report 每次用量變動 debounce 寫 ~/.sense/usage-report.md，
 /// 隨時是最新（不靠選單 osascript 觸發）。
 @MainActor @Observable
 final class MetricsStore {
@@ -35,8 +35,8 @@ final class MetricsStore {
         Self.rates[polishModel] ?? (0.75, 0.075, 4.50)
     }
 
-    private let stateURL = URL(fileURLWithPath: kiloWorkdir + "/usage-state.json")
-    private let reportURL = URL(fileURLWithPath: kiloWorkdir + "/usage-report.md")
+    private let stateURL = URL(fileURLWithPath: senseWorkdir + "/usage-state.json")
+    private let reportURL = URL(fileURLWithPath: senseWorkdir + "/usage-report.md")
     private var writeTask: Task<Void, Never>?
 
     init() { loadLifetime() }
@@ -127,7 +127,7 @@ final class MetricsStore {
         let df = DateFormatter()
         df.dateFormat = "yyyy-MM-dd HH:mm"
         return """
-            # Kilo 用量報告
+            # Sense 用量報告
 
             ## 本 session（app 開機後 · model: \(polishModel)）
             - 處理音訊：**\(mins) 分鐘**

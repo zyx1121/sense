@@ -3,7 +3,7 @@ import ApplicationServices
 import Foundation
 import QuartzCore
 
-/// shake 機制的 kilo 接線：晃游標 → 變暗 + 元素 spotlight → 左鍵捕捉進
+/// shake 機制的 sense 接線：晃游標 → 變暗 + 元素 spotlight → 左鍵捕捉進
 /// TranscriptStore.attachments（chips 顯示、下一輪 codex 帶上）→ 右鍵 / 再晃結束。
 /// 機制本體（detector / dim / probe / interceptor / capturer）ported from zyx1121/shake。
 @MainActor
@@ -23,7 +23,7 @@ final class ShakeCapture {
 
     /// 選取模式開關（SummaryWindow 抬到 dim 之上 / 降回來）。
     var onSelectingChange: (Bool) -> Void = { _ in }
-    /// kilo 視窗的 CG frame — 選取模式中點它放行，可以邊圈選邊打字。
+    /// sense 視窗的 CG frame — 選取模式中點它放行，可以邊圈選邊打字。
     var passThroughFrame: () -> CGRect = { .zero }
 
     init(store: TranscriptStore) {

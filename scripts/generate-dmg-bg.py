@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""DMG 背景圖 — 深色漸層 + Kilo(mono) + 👉 emoji，1x/2x retina。
+"""DMG 背景圖 — 深色漸層 + Sense(mono) + 👉 emoji，1x/2x retina。
 用法：python3 scripts/generate-dmg-bg.py
 然後：tiffutil -cathidpicheck /tmp/dmg-bg.png /tmp/dmg-bg@2x.png -out Resources/dmg-background.tiff
 佈局數值（icon 位置 / size）對應 scripts/make-dmg.sh 的 osascript。
@@ -36,8 +36,8 @@ def render(s):
     def f(sz, idx=0):
         return ImageFont.truetype(MONO, sz * s, index=idx)
 
-    d.text((W * s / 2, 72 * s), "Kilo", font=f(30, 1), fill=(240, 244, 250), anchor="mm")
-    d.text((W * s / 2, 108 * s), "Drag Kilo into Applications",
+    d.text((W * s / 2, 72 * s), "Sense", font=f(30, 1), fill=(240, 244, 250), anchor="mm")
+    d.text((W * s / 2, 108 * s), "Drag Sense into Applications",
            font=f(13), fill=(150, 156, 168), anchor="mm")
 
     th = EMOJI_H * s

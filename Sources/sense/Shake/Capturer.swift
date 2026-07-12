@@ -110,7 +110,7 @@ final class Capturer {
                 onScreenWindowsOnly: true
             )
             guard let display = displayContaining(cgRect, in: content) else { return nil }
-            let myBundle = Bundle.main.bundleIdentifier ?? "tw.zyx.kilo"
+            let myBundle = Bundle.main.bundleIdentifier ?? "tw.zyx.sense"
             let excluded = content.windows.filter {
                 $0.owningApplication?.bundleIdentifier == myBundle
             }

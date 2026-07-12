@@ -127,10 +127,10 @@ final class AgentController {
         }
     }
 
-    /// 拖入的圖片檔 clone 進 ~/.kilo/captures（APFS COW，免解碼免等）— 原檔之後被移走
+    /// 拖入的圖片檔 clone 進 ~/.sense/captures（APFS COW，免解碼免等）— 原檔之後被移走
     /// 也不影響；檔名自家產（UUID + 淨化過的副檔名），拼進 codex -i 的單引號才安全。
     private func stageImage(_ url: URL) -> String? {
-        let dir = kiloWorkdir + "/captures"
+        let dir = senseWorkdir + "/captures"
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         let ext = url.pathExtension.filter { $0.isLetter || $0.isNumber }
         let dest = dir + "/drop-\(UUID().uuidString)" + (ext.isEmpty ? "" : ".\(ext)")
@@ -184,7 +184,7 @@ final class AgentController {
         var files: [String] = []
         for a in attachments {
             guard case .file(let p) = a.kind else { continue }
-            if p.hasPrefix(kiloWorkdir + "/captures/") { stagedImages.append(p) } else { files.append(p) }
+            if p.hasPrefix(senseWorkdir + "/captures/") { stagedImages.append(p) } else { files.append(p) }
         }
         if !files.isEmpty {
             fullInstruction += "\n\n（使用者拖入的檔案，用工具直接讀這些路徑）\n" + files.joined(separator: "\n")
@@ -230,9 +230,9 @@ final class AgentController {
         }
     }
 
-    /// 圈選截圖存到 ~/.kilo/captures/（codex 之後也能自己讀），回傳路徑。
+    /// 圈選截圖存到 ~/.sense/captures/（codex 之後也能自己讀），回傳路徑。
     private func saveImages(_ attachments: [Asset]) -> [String] {
-        let dir = kiloWorkdir + "/captures"
+        let dir = senseWorkdir + "/captures"
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         return attachments.compactMap { a in
             guard let data = a.pngData() else { return nil }
@@ -264,7 +264,7 @@ final class AgentController {
                     got = true
                     store.appendReply(text)
                 case .usage(let p, let cached, let comp):
-                    metrics.recordLLMUsage(prompt: p, cached: cached, completion: comp)  // Kilo 問答也計量
+                    metrics.recordLLMUsage(prompt: p, cached: cached, completion: comp)  // Sense 問答也計量
                 }
             }
             return (got, nil)
