@@ -106,7 +106,7 @@ struct PolishedBlock: Identifiable {
     let at: Date              // 開塊時間（標頭時間戳）
     var range: CMTimeRange?   // 音訊時間範圍（聯集；算時長）
 
-    /// 整段純文字（codex context / 歸檔 / 字數）。
+    /// 整段純文字（claude context / 歸檔 / 字數）。
     var text: String { paras.map(\.text).joined(separator: "\n\n") }
     /// mic（會議我這側）vs 系統音訊 — 來源標「我」即 mic。
     var isMic: Bool { source == "我" }
@@ -115,14 +115,14 @@ struct PolishedBlock: Identifiable {
     var durationSeconds: Double? { range.map { $0.duration.seconds } }
 }
 
-/// 逐字稿連續文件流 + Sense agent 步驟 feed。window 顯示、codex agent 讀來思考。
+/// 逐字稿連續文件流 + Sense agent 步驟 feed。window 顯示、claude agent 讀來思考。
 /// 逐字稿三層：polished（小模型整理過）→ pending（定稿待整理，帶 locale）→ volatile（辨識中，打字機推進）。
 @MainActor @Observable
 final class TranscriptStore {
     /// 整理完的段塊：同來源的連續整理批合成一塊。at = 開塊時間（標頭顯示時間戳用）；
     /// range = 音訊時間範圍（算時長）。
     private(set) var polishedBlocks: [PolishedBlock] = []
-    /// 已整理全文（不含講者標頭）— codex context、polisher 前文參考、長度計算用。
+    /// 已整理全文（不含講者標頭）— claude context、polisher 前文參考、長度計算用。
     var polished: String { polishedBlocks.map(\.text).joined(separator: "\n\n") }
     private(set) var pending: [PendingSegment] = []
     private(set) var volatileShown = ""
@@ -131,7 +131,7 @@ final class TranscriptStore {
     private(set) var micVolatile = ""
     private var volatileTask: Task<Void, Never>?
 
-    /// 顯示與 codex context 用的待整理全文。
+    /// 顯示與 claude context 用的待整理全文。
     var pendingRaw: String { pending.reduce("") { glue($0, $1.text) } }
 
     private(set) var feed: [AgentStep] = []
@@ -139,7 +139,7 @@ final class TranscriptStore {
     private var replyTask: Task<Void, Never>?
     private var stepSeq = 0
 
-    /// shake 圈選收進來、等下一輪 codex 帶上的素材。
+    /// shake 圈選收進來、等下一輪 claude 帶上的素材。
     private(set) var attachments: [Asset] = []
 
     // — PTT（按住右 ⇧ 說話）：草稿放 store 才能讓語音注入；view 雙向綁定同一份 —
@@ -197,7 +197,7 @@ final class TranscriptStore {
     var transcriptLength: Int { polished.count + pendingRaw.count + volatileShown.count + micVolatile.count }
     var transcriptEmpty: Bool { polished.isEmpty && pendingRaw.isEmpty && volatileShown.isEmpty && micVolatile.isEmpty }
 
-    /// 餵給 codex 的 context（整理過 + 未整理 + 辨識中的尾端）。
+    /// 餵給 claude 的 context（整理過 + 未整理 + 辨識中的尾端）。
     var context: String { String(glue(glue(polished, pendingRaw), volatileTarget).suffix(4000)) }
 
     // MARK: - 逐字稿

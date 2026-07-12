@@ -37,7 +37,7 @@ private func composeInstructions(locale: String, contextTail: String) -> String 
 
 /// 小模型即時整理逐字稿：pendingRaw 滿 60 字立刻整理、不滿則 4s idle 後整理；
 /// 一次一個 in-flight，失敗就原文轉正不卡流。沒 OpenAI key → 整理關閉（raw 留在 pendingRaw）。
-/// 整理直打 OpenAI API（不走 codex exec，省 22k token 的 agent prompt）。
+/// 整理直打 OpenAI API（不走 agent CLI，省掉整包 agent system prompt 的 token）。
 /// 不用 on-device FoundationModels：實測錯字修正明顯較差（只修指令例子教過的、英文偏保守），
 /// 且需 Apple Intelligence 啟用（Mac 與 Siri 同語言）— 純退步，移除。
 @MainActor

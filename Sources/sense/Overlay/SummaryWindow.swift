@@ -189,7 +189,7 @@ struct TranscriptView: View {
                 .background(.white.opacity(0.04))
             }
 
-            // 指令輸入 → codex agent；按住右 ⇧ 語音口述；相機 = 截游標所在螢幕變 chip
+            // 指令輸入 → claude agent；按住右 ⇧ 語音口述；相機 = 截游標所在螢幕變 chip
             HStack(spacing: 8) {
                 if store.pttRecording {
                     Image(systemName: "mic.fill")
@@ -220,7 +220,7 @@ struct TranscriptView: View {
         .frame(width: sz(360))
         .fixedSize(horizontal: false, vertical: true)
         .glassEffect(in: .rect(cornerRadius: 16))
-        // Finder 拖檔進來 → chips（圖片走 -i、其他留路徑給 codex 讀）
+        // Finder 拖檔進來 → chips（圖片與檔案都以路徑給 claude 用 Read 讀）
         .overlay {
             if dropTargeted {
                 RoundedRectangle(cornerRadius: 16)

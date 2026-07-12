@@ -1,7 +1,7 @@
 import Foundation
 
 /// 逐字稿持久化：整理過的批次連續追加到 ~/.sense/transcripts/YYYY-MM-DD.md。
-/// sense 的記憶從 session 級變長期 — codex workspace 就在 ~/.sense，舊逐字稿直接可查。
+/// sense 的記憶從 session 級變長期 — claude workspace 就在 ~/.sense，舊逐字稿直接可查。
 /// 來源（app / 視窗標題）變更時插一行 header，筆記有出處。
 @MainActor
 final class TranscriptArchiver {

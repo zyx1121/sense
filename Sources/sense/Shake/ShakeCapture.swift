@@ -4,7 +4,7 @@ import Foundation
 import QuartzCore
 
 /// shake 機制的 sense 接線：晃游標 → 變暗 + 元素 spotlight → 左鍵捕捉進
-/// TranscriptStore.attachments（chips 顯示、下一輪 codex 帶上）→ 右鍵 / 再晃結束。
+/// TranscriptStore.attachments（chips 顯示、下一輪 claude 帶上）→ 右鍵 / 再晃結束。
 /// 機制本體（detector / dim / probe / interceptor / capturer）ported from zyx1121/shake。
 @MainActor
 final class ShakeCapture {

@@ -8,9 +8,9 @@ import Foundation
 final class MetricsStore {
     private(set) var segments = 0       // 逐字稿段數
     private(set) var asrChars = 0       // 累積辨識字數
-    private(set) var codexCalls = 0
-    private(set) var codexErrors = 0
-    private(set) var lastCodexLatency: TimeInterval = 0  // 最近一次 codex 往返秒數
+    private(set) var agentCalls = 0
+    private(set) var agentErrors = 0
+    private(set) var lastAgentLatency: TimeInterval = 0  // 最近一次 agent 往返秒數
 
     // 本 session token 用量（含 cached ⊆ prompt）
     private(set) var promptTokens = 0
@@ -66,10 +66,10 @@ final class MetricsStore {
         scheduleWrite()
     }
 
-    func recordCodex(latency: TimeInterval, failed: Bool) {
-        codexCalls += 1
-        if failed { codexErrors += 1 }
-        lastCodexLatency = latency
+    func recordAgent(latency: TimeInterval, failed: Bool) {
+        agentCalls += 1
+        if failed { agentErrors += 1 }
+        lastAgentLatency = latency
     }
 
     /// API 回應 usage → 累積 token + 用當下費率累加 cost（cached ⊆ prompt）。

@@ -9,7 +9,7 @@ import UniformTypeIdentifiers
 enum AssetKind {
     case text(String)
     case image(NSImage)
-    case file(String)  // 絕對路徑 — 不讀內容進 prompt，codex 自己用工具讀
+    case file(String)  // 絕對路徑 — 不讀內容進 prompt，claude 自己用 Read 工具讀
 }
 
 struct Asset: Identifiable {
@@ -49,7 +49,7 @@ struct Asset: Identifiable {
         }
     }
 
-    /// 截圖 → PNG（餵 codex `-i`）。
+    /// 截圖 → PNG（存進 captures，路徑餵給 claude 用 Read 讀）。
     func pngData() -> Data? {
         guard case .image(let img) = kind,
               let tiff = img.tiffRepresentation,

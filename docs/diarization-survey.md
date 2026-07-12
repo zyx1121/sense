@@ -1,4 +1,4 @@
-# Speaker Diarization Survey (2026) — kilo-sense 觀點
+# Speaker Diarization Survey (2026) — sense 觀點
 
 > 給已經砍掉一整條 diarization pipeline 的人看的 survey。
 > 整理日期：2026-06-16 · 適用：macOS 26 / Apple Silicon · on-device、即時、連續轉錄
@@ -34,11 +34,11 @@
 |---|---|---|---|---|
 | **Apple-native (Speech/SpeechAnalyzer/SoundAnalysis)** | — | — | 零(但沒這功能) | macOS 26 全系列**沒有任何** speaker 模組,別等別設計依賴它 [WWDC25 s277; speech.json] |
 | **FluidAudio · LS-EEND** | ✅ default online、最多 10 人 | ❌ 相似聲音會 collide、快速輪替會 collapse | 中(CoreML/ANE,但**目前非 repo 依賴**,要新增) | 上次 collapse 的就是這條;訓練資料偏模擬 [GettingStarted.md] |
-| **FluidAudio · Sortformer** | ✅ online、固定 4 slot | △ session 內較穩,但 **boundary 仍翻**(owner 實測+kilo 自己 PR#75/76 記載) | 中(CoreML/ANE,需新增依賴) | 廠商文件「extremely stable」指 session 內 / 跨會議 recall,**不是** turn-boundary;別誤讀 |
+| **FluidAudio · Sortformer** | ✅ online、固定 4 slot | △ session 內較穩,但 **boundary 仍翻**(owner 實測+sense 自己 PR#75/76 記載) | 中(CoreML/ANE,需新增依賴) | 廠商文件「extremely stable」指 session 內 / 跨會議 recall,**不是** turn-boundary;別誤讀 |
 | **FluidAudio / pyannote 3.1 · community-1(批次)** | ❌ 離線批次為主 | ✅ 全域 clustering → 每人一個穩定 label | 中 | 需完整音訊;非即時 |
 | **sherpa-onnx · offline diarization** | ❌ 離線(pyannote-seg-3.0 + embed + cluster) | ✅(全域 clustering) | 低-中(Apache-2.0,first-party Swift,xcframework+bridging) | 跨語言(zh-en code-switch)準度未實測 |
 | **sherpa-onnx · SpeakerEmbeddingManager(register/search)** | ✅ 可逐窗跑 live | ✅ 身分=查表,無 permutation | 低 | open-set threshold 要調;只認已 enroll 的人 |
-| **Argmax SpeakerKit (pyannote-community-1, CoreML)** | ❌ 離線批次(無 streaming API) | ✅(全域 clustering) | **最低**(MIT,跟 WhisperKit 同 vendor 同 package,co-load 乾淨) | macOS 13+ vs kilo 釘 macOS 26(相容但要留意) |
+| **Argmax SpeakerKit (pyannote-community-1, CoreML)** | ❌ 離線批次(無 streaming API) | ✅(全域 clustering) | **最低**(MIT,跟 WhisperKit 同 vendor 同 package,co-load 乾淨) | macOS 13+ vs sense 釘 macOS 26(相容但要留意) |
 | **WhisperKit / 純 STgT 庫** | — | — | — | 只做轉錄,無 speaker;不在此題範圍 |
 | **Personal VAD(單目標 3-class)** | ✅ streaming gating | N/A(只判「我 / 非我」,無多講者排序) | 低(130K 參數,可當 embedding 上的小 CoreML head) | 只回答「目標講者在不在講」,不切多人 |
 | **Online TS-VAD(每講者一個 enroll-conditioned head)** | ✅ | ✅ **by construction**(無 slot 可排、無 attractor 可不穩) | 高(無現成 Swift/CoreML,要自建) | 只對 enrolled 講者有效;enrollment 品質 / drift;兩個 enrolled 講者重疊 |
@@ -57,14 +57,14 @@
 把身分**事先**綁到一組固定的 enrolled profile,線上就沒有身分指派決策可翻。
 
 - TS-VAD 把每個輸出 channel 綁定一個 enrolled 講者 embedding,channel→identity 在 enrollment 時就固定、不需 PIT「講者 A 永遠輸出到 channel A」[Seq2Seq-TSVAD arXiv:2210.16127; TS-VAD+ APSIPA 2025; Microsoft arXiv:2208.13085]。
-- 但**最便宜、最貼 kilo 需求的不是 TS-VAD,而是 verification**:每段 → embedding → 對每個 enrolled profile 算 cosine → argmax 過 threshold = 那個人,否則 unknown。這是**無狀態的 per-segment 是非題**,沒有 turn-boundary 追蹤。open-set 協定有 VoxWatch [arXiv:2307.00169] / VoxBlink2 [arXiv:2407.11510] 形式化。現代 extractor 在 VoxCeleb-1 verification 約 0.4–1.0% EER(WeSpeaker ResNet293 ~0.425%)。
-  - ⚠️ **caveat(adversarial 修正):** 那 0.4–1.0% 是 2-utterance verification EER,**不是** open-set ID 錯誤率。gallery 變大、segment 變短(~2–5s)會明顯變差。kilo 的 gallery 很小(幾個常見同事),正是 open-set ID 最容易的區間,所以可行;但別把 verification EER 當成對 gallery 的逐段 ID 錯誤率,且要做 calibrated/AS-Norm threshold + 跨段 score smoothing。
-- **修正一個會被誤導的前提:** 「FluidAudio 已是 kilo-sense 依賴,在它上面加 ID 即可」——**REFUTED**。`/Users/loki/kilo-sense/Package.swift` **零宣告依賴**,沒有 FluidAudio;PR#87 已把整條 speaker 程式碼移除;repo 內唯一 FluidInference 引用是借自另一個 sample repo `swift-scribe` 的 buffer 轉換片段。所以走 enrollment-first 是**新增**一個 SPM 依賴(FluidAudio 或 sherpa-onnx)+ 下載 CoreML 模型(~100MB),不是「reuse 既有依賴」。(FluidAudio 的 `extractSpeakerEmbedding(from:)` / `Speaker(id,name,currentEmbedding)` / `initializeKnownSpeakers([...])` API 確實存在、256-d L2-normalized、ANE-only;但**沒有**內建 cosine-vs-enrolled call,要自己算。)
+- 但**最便宜、最貼 sense 需求的不是 TS-VAD,而是 verification**:每段 → embedding → 對每個 enrolled profile 算 cosine → argmax 過 threshold = 那個人,否則 unknown。這是**無狀態的 per-segment 是非題**,沒有 turn-boundary 追蹤。open-set 協定有 VoxWatch [arXiv:2307.00169] / VoxBlink2 [arXiv:2407.11510] 形式化。現代 extractor 在 VoxCeleb-1 verification 約 0.4–1.0% EER(WeSpeaker ResNet293 ~0.425%)。
+  - ⚠️ **caveat(adversarial 修正):** 那 0.4–1.0% 是 2-utterance verification EER,**不是** open-set ID 錯誤率。gallery 變大、segment 變短(~2–5s)會明顯變差。sense 的 gallery 很小(幾個常見同事),正是 open-set ID 最容易的區間,所以可行;但別把 verification EER 當成對 gallery 的逐段 ID 錯誤率,且要做 calibrated/AS-Norm threshold + 跨段 score smoothing。
+- **修正一個會被誤導的前提:** 「FluidAudio 已是 sense 依賴,在它上面加 ID 即可」——**REFUTED**。`/Users/loki/sense/Package.swift` **零宣告依賴**,沒有 FluidAudio;PR#87 已把整條 speaker 程式碼移除;repo 內唯一 FluidInference 引用是借自另一個 sample repo `swift-scribe` 的 buffer 轉換片段。所以走 enrollment-first 是**新增**一個 SPM 依賴(FluidAudio 或 sherpa-onnx)+ 下載 CoreML 模型(~100MB),不是「reuse 既有依賴」。(FluidAudio 的 `extractSpeakerEmbedding(from:)` / `Speaker(id,name,currentEmbedding)` / `initializeKnownSpeakers([...])` API 確實存在、256-d L2-normalized、ANE-only;但**沒有**內建 cosine-vs-enrolled call,要自己算。)
 
 ### (2) 離線 / look-ahead re-segmentation:用延遲換穩定
 
 - **延後定型:** FluidAudio 的 `DiarizerTimelineUpdate` 把輸出分 finalized + tentative;只消費 finalized 段、容忍 sub-second 延遲,能避免「naive 逐 frame 立刻 commit」的部分 artifact。
-  - ⚠️ **但別當成翻身分的解藥(adversarial 修正):** kilo 的 log 顯示 Sortformer **在 boundary 翻的是身分(identity),不是 commit 時機**——而且 kilo 上次**早就**在做 late-binding(消費 tentativeSegments、polish 時才解 label、加 2s settle delay)。late-binding 改善的是 boundary **placement**,不是 identity 穩定度。文件也沒明寫引擎會「背景持續 refine tentative label 再 finalize」,那是推論。
+  - ⚠️ **但別當成翻身分的解藥(adversarial 修正):** sense 的 log 顯示 Sortformer **在 boundary 翻的是身分(identity),不是 commit 時機**——而且 sense 上次**早就**在做 late-binding(消費 tentativeSegments、polish 時才解 label、加 2s settle delay)。late-binding 改善的是 boundary **placement**,不是 identity 穩定度。文件也沒明寫引擎會「背景持續 refine tentative label 再 finalize」,那是推論。
 - **真正不同的是 two-stage local-global:** live 先吐 provisional stream,等一個 utterance / turn-group 收完,再跑一次離線 re-segmentation + 全域 clustering(VBx / EEND-VC / DiariZen / pyannote community-1)**回溯修正** label,才標成 final。這拿即時正確性換最終正確性,是用 streaming UX 拿到離線級準度的唯一路。工程量偏大,但這是「什麼會不一樣」的正解。
 
 ### (3) 若硬要 open-set live diarization:買 look-ahead,別承諾正確
@@ -74,11 +74,11 @@
 
 ### 為什麼 Apple-native 這條不用考慮
 
-macOS 26 全 26.x 在你點名的整個表面(Speech / SpeechAnalyzer / SpeechTranscriber / DictationTranscriber / SpeechDetector / SFSpeechRecognizer;AVFoundation;SoundAnalysis)**零** speaker-segmentation / speaker-ID / speaker-count / per-token 講者標註 [speech.json 完整 symbol list 無任何含 "Speaker" 或 "Diarization" 者; WWDC25 s277]。SpeechAnalyzer 的 Result 只有 text / isFinal / audioTimeRange。SFTranscriptionSegment 也只有 substring/timestamp/duration/confidence/alternativeSubstrings/voiceAnalytics——`voiceAnalytics` 是 pitch/jitter/shimmer,**不是身分**。SoundAnalysis 的 ~300+ 類只認「是什麼聲音」(speech/laughter/...),不認「誰」。**沒有任何訊號顯示 Apple 2026 會補上**;每個要 diarization 的 macOS 26 app 都外掛第三方(swift-scribe/ambient-voice/SpeakerKit),這本身就是沒有原生路徑的旁證。Apple 唯一的「誰在講」原語,就是 kilo 已保留的 mic-vs-loopback 音訊源分流。
+macOS 26 全 26.x 在你點名的整個表面(Speech / SpeechAnalyzer / SpeechTranscriber / DictationTranscriber / SpeechDetector / SFSpeechRecognizer;AVFoundation;SoundAnalysis)**零** speaker-segmentation / speaker-ID / speaker-count / per-token 講者標註 [speech.json 完整 symbol list 無任何含 "Speaker" 或 "Diarization" 者; WWDC25 s277]。SpeechAnalyzer 的 Result 只有 text / isFinal / audioTimeRange。SFTranscriptionSegment 也只有 substring/timestamp/duration/confidence/alternativeSubstrings/voiceAnalytics——`voiceAnalytics` 是 pitch/jitter/shimmer,**不是身分**。SoundAnalysis 的 ~300+ 類只認「是什麼聲音」(speech/laughter/...),不認「誰」。**沒有任何訊號顯示 Apple 2026 會補上**;每個要 diarization 的 macOS 26 app 都外掛第三方(swift-scribe/ambient-voice/SpeakerKit),這本身就是沒有原生路徑的旁證。Apple 唯一的「誰在講」原語,就是 sense 已保留的 mic-vs-loopback 音訊源分流。
 
 ---
 
-## 4. 給 kilo-sense 的具體建議(分階段)
+## 4. 給 sense 的具體建議(分階段)
 
 約束:連續 on-device、mic+system source 已切「我/對方」、owner 已否決 blind streaming diarization。
 
@@ -96,7 +96,7 @@ macOS 26 全 26.x 在你點名的整個表面(Speech / SpeechAnalyzer / SpeechTr
 - 不要復活 **LLM AttributionEnricher**。它在補一個本該由 timeline-finalization / source-anchor 解的問題。文獻證實:每個 LLM diarization corrector 都是離線二次 pass(不適合連續低延遲),而從對話內**名字**反推身分是已知難的 vocative/addressing 歧義——連 DiarizationLM 都靠餵外部 metadata(video title / 與會者名單)而非信任對話內名字 [arXiv:2401.03506 App. B.1 vs B.2]。「稱呼語鏡像陷阱」(說出口的名字指的是對方)是可預期的,因為它在打一個 under-cued 的問題。
   - 若哪天真的要 post-correct,只能用 SEAL 式:把 LLM 條件在離散化的聲學信心上、硬約束 decoding 為 relabel-only,**絕不讓 LLM 自由產文或發明名字**。lexical+acoustic fusion 確實勝過純聲學(AG-LSEC、Contextual Beam Search ~39.8% rel. ΔSA-WER 改善),所以 lexical 信號值得用——但當成對聲學 prior 的受限 nudge,不是身分權威。
 
-**誠實的話:** 對一個個人「我 vs 對方」app,最好的答案很可能就是 **scope 到 enrolled-speaker identification only**(Stage 1),或 **離線在存好的逐字稿上做**(Stage 2)。general N-speaker live diarization 不是 kilo 該扛的問題。
+**誠實的話:** 對一個個人「我 vs 對方」app,最好的答案很可能就是 **scope 到 enrolled-speaker identification only**(Stage 1),或 **離線在存好的逐字稿上做**(Stage 2)。general N-speaker live diarization 不是 sense 該扛的問題。
 
 ---
 
@@ -106,8 +106,8 @@ macOS 26 全 26.x 在你點名的整個表面(Speech / SpeechAnalyzer / SpeechTr
 - ❌ 「EEND-TA 只提速、沒解掉 attractor 不穩」——反了,EEND-TA 明確動機是移除 order dependence;「EDA struggles to produce well-separated attractors」一句是捏造。
 - ❌ 「Sortformer 因 positional-embedding 把講者鎖 slot,所以 boundary 必翻」——文獻無此因果,且與 AOSC 設計動機相反;是未證實假說。
 - ❌ 「2026 on-device 全領域已收斂到離線批次 clustering、且這是避免翻身分的唯一結構解」——反例:Streaming Sortformer(AOSC)、LS-EEND(online attractor)是 2025-26 的 streaming model upgrade,不靠全域 clustering 就維持 label 穩定。離線批次只是其中一條穩定路,不是唯一。
-- ❌ 「FluidAudio 已是 kilo-sense 依賴」——Package.swift 零依賴,PR#87 已移除全部 speaker 程式碼;走任何第三方都是新增依賴。
-- ❌ 「FluidAudio 文件框的就是 kilo 砍 pipeline 的同一個問題、且打臉 kilo 的判斷」——不是同一個失敗模式:文件「extremely stable」指 session 內 / 跨會議 recall,kilo 砍的是 turn-boundary identity flip;kilo 早已切到 Sortformer(PR#74)正是照文件建議做,沒誤用。
+- ❌ 「FluidAudio 已是 sense 依賴」——Package.swift 零依賴,PR#87 已移除全部 speaker 程式碼;走任何第三方都是新增依賴。
+- ❌ 「FluidAudio 文件框的就是 sense 砍 pipeline 的同一個問題、且打臉 sense 的判斷」——不是同一個失敗模式:文件「extremely stable」指 session 內 / 跨會議 recall,sense 砍的是 turn-boundary identity flip;sense 早已切到 Sortformer(PR#74)正是照文件建議做,沒誤用。
 
 被判 **partially-supported / 須留意** 的(可用但注意邊界):
 - △ Sortformer streaming cadence 是 480ms/560ms 不是 80ms;DER 數字隨 latency config 劇烈變動(同模型 13.24%↔42.56% 看人數、Benchmark 高延遲 config 另報 31.7%),**任何單一 DER 都是 config-dependent,非固定屬性**;且 streaming DER 一律比常被引用的離線 DER 差。
@@ -119,7 +119,7 @@ macOS 26 全 26.x 在你點名的整個表面(Speech / SpeechAnalyzer / SpeechTr
 
 **未驗證 / 範圍外:**
 - 沒有任何 2026 系統聲稱**解決** open-set N-speaker streaming 的 boundary 翻身分;共識仍是 look-ahead / two-stage 全域 clustering / 限縮問題來 mitigate。若目標是真 open-set live,誠實答案是 SOTA 沒關上這個 gap。
-- 所有 DER/EER 數字皆來自 2-/few-speaker 電話或會議 benchmark,**沒有**針對 kilo 的 zh-en code-switch、連續雙源、Apple Silicon 實測;cross-lingual speaker-ID 準度未測,threshold 上線前必須在 Loki 實際音訊上 pilot。
+- 所有 DER/EER 數字皆來自 2-/few-speaker 電話或會議 benchmark,**沒有**針對 sense 的 zh-en code-switch、連續雙源、Apple Silicon 實測;cross-lingual speaker-ID 準度未測,threshold 上線前必須在 Loki 實際音訊上 pilot。
 - FluidAudio CoreML 轉換相對上游 NVIDIA checkpoint 的保真度未複驗;假設 v2/v2.1 行為 = 上游 NeMo 行為。
 - Picovoice Falcon 的 9.0% vs 10.3% DER 是廠商自報、且 macOS/Apple Silicon 支援未在所查頁面明述;封閉源 + 強制 AccessKey(線上啟用驗證)+ 批次非 streaming——只在 sherpa-onnx 準度不足時才值得碰。
 
