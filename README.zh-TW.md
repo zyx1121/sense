@@ -1,164 +1,101 @@
-```text
-███████╗███████╗███╗   ██╗███████╗███████╗
-██╔════╝██╔════╝████╗  ██║██╔════╝██╔════╝
-███████╗█████╗  ██╔██╗ ██║███████╗█████╗
-╚════██║██╔══╝  ██║╚██╗██║╚════██║██╔══╝
-███████║███████╗██║ ╚████║███████║███████╗
-╚══════╝╚══════╝╚═╝  ╚═══╝╚══════╝╚══════╝
+<!-- 翻譯自 README.md @ docs/readme-template-v2。只翻 "For AI agents" 以上的章節，英文版更新時一起改。 -->
+
+<div align="center">
+
+<h1>sense</h1>
+
+<p><strong>給 Claude Code 的 macOS 感官：即時字幕你聽到的，擷取你指到的。</strong></p>
+
+[![CI](https://img.shields.io/github/actions/workflow/status/zyx1121/sense/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/zyx1121/sense/actions)
+[![Release](https://img.shields.io/github/v/release/zyx1121/sense?style=flat-square&sort=semver)](https://github.com/zyx1121/sense/releases)
+[![macOS](https://img.shields.io/badge/macOS-26%2B-000000?style=flat-square&logo=apple)](Package.swift)
+[![License](https://img.shields.io/github/license/zyx1121/sense?style=flat-square)](LICENSE)
+
+[English](README.md) | **繁體中文** | [简体中文](README.zh-CN.md)
+
+</div>
+
+上課、開會、看影片時，不是分心抄筆記，就是乾脆不抄。sense 在瀏海下顯示即時字幕，旁邊累積完整逐字稿。你可以專心聽，再問剛剛聽到的內容。只有兩個部分會連網：整理逐字稿的小模型，和你自己的 Claude Code。
+
+## 功能
+
+- **瀏海字幕**：系統音訊在 Mac 上轉寫。草稿是灰字，定稿後變白字。
+- **中英文自動切換**：兩個辨識器同時跑，sense 跟隨信心較高的那一個。
+- **乾淨的逐字稿**：小模型分批修正標點與辨識錯誤。每段標示時間與來源 app。
+- **用 Claude Code 回答**：Ask Sense 把你的問題與最近的逐字稿交給 headless Claude Code，它也能把筆記寫進 `~/.sense/`。
+- **語音與手勢擷取**：按住右 ⇧ 口述，或搖動游標擷取畫面元素。會議模式會加入你自己的聲音。
+
+## 快速開始
+
+從 [Releases](https://github.com/zyx1121/sense/releases/latest) 下載最新的 DMG，或不用 Xcode 自己建置：
+
+```sh
+make run       # 建置、打包、簽章並開啟
+make install   # 複製到 /Applications，登入時啟動與穩定的權限都需要這步
 ```
 
-# sense
+macOS 詢問時，允許「螢幕錄製」與「輔助使用」。播放任何影片，瀏海下就會出現字幕。
 
-> Claude Code 的 macOS 感官 — 聽見你在聽的、看見你指的，即時轉錄與整理，交給 Claude Code 分析與記錄。
+## 使用方式
 
-`SpeechAnalyzer` · `ScreenCaptureKit` · `Claude Code` · `gpt-5.4-mini` · `shake-to-capture`
+- **選單列**：開啟逐字稿資料夾、調整浮窗大小、清除對話。其他項目可開啟權限設定、設定登入項目、重新啟動與結束。
+- **浮窗**：拖曳標題列移動。⌘= 與 ⌘- 調整大小，⌘0 重設。輸入 `/clear` 清除對話。圖釘讓浮窗保持展開。
+- **檔案**：從 Finder 把檔案拖到浮窗上。Claude Code 依路徑讀取每個檔案。
+- **按住說話**：按住右 ⇧ 說話，文字會出現在輸入框。只有按住時麥克風才開啟。
+- **會議模式**：系統音訊不含你自己的聲音。開啟會議模式後，麥克風會把你的話以 **我** 加入逐字稿。
+- **搖動擷取**：搖動游標，左鍵點選想要的元素，右鍵結束。擷取內容在下一輪交給 Claude Code。
+- **語言**：`Sense --langs zh-TW,en-US`(預設)同時跟隨兩種語言。`Sense --lang ja-JP` 只用一種。`make locales` 列出支援的語言。
 
-[English](README.md) · **繁體中文**
+## 設定
 
-## 它做什麼
+| 需要 | 用途 | 沒有時 |
+|------|------|--------|
+| macOS 26 以上 | SpeechAnalyzer | sense 無法執行 |
+| `PATH` 上有 `claude` | Ask Sense，使用你的 Claude Code 登入 | 字幕與逐字稿照常運作 |
+| `OPENAI_API_KEY`，或 Keychain 項目 `service=sense account=openai` | 用 `gpt-5.4-mini` 整理逐字稿 | 原文直出 |
+| `Makefile.local` 裡的 `SIGN_ID` | 用你的 Apple Development 憑證簽章 | ad-hoc 簽章 |
+| 螢幕錄製、輔助使用、麥克風 | 音訊與截圖、搖動擷取、口述 | 第一次使用時 macOS 會詢問 |
 
-開著 sense 看影片、開會、上課：
-
-- **瀏海字幕** — 系統音訊即時轉錄，volatile 灰字逐字打出、定稿轉白，瀏海下方一行流過
-- **中英自動切換** — 兩路 SpeechTranscriber 同時轉錄，比較各路定稿信心（EMA + 遲滯），講到哪個語言就自動走哪路
-- **連續逐字稿** — 可拖動的 overlay 視窗累積全文；小模型背景把生稿補標點、修辨識錯字、分段 — 灰字尾巴一直流入，幾秒後被整理過的白字取代。每個區段標頭顯示時間戳與來源 app（`Safari: <影片標題>` 等）；靜默 gap 或來源切換時開新區段
-- **問 Sense** — 輸入框直通 headless 跑的 **Claude Code**（帶最近逐字稿 + session 記憶，靠 `--resume` 續接），tool use 步驟即時浮出、回應打字機串流；說「記錄下來」它就寫筆記進 `~/.sense/`，回覆裡的路徑點了直接開
-- **按住說話** — 按住**右 ⇧** 對 Sense 口述，文字即時打進輸入框（本機轉錄），放開可修改、Enter 送出；只有按住時 mic 才開著
-- **會議模式** — 系統音訊裡沒有你自己的聲音，開會時逐字稿會少掉你這側；從選單列打開後 mic 持續錄，你的發言以「**我**」標進逐字稿、系統音訊維持對方那側
-- **Shake 圈選** — 晃游標進選取模式：螢幕變暗、游標下的 UI 元素亮起，左鍵點擊收集（文字收文字、其他截圖），右鍵結束；素材變輸入框上方的 chips，下一輪以路徑交給 Claude Code（它用自己的工具讀）
-
-## 架構
+## 運作方式
 
 ```mermaid
 flowchart TD
-    ear["👂 系統音訊<br/>你正在聽的"]
-    eye["👆 Shake 圈選<br/>你指的"]
-    asr["即時轉錄<br/>SpeechAnalyzer · 雙語信心擇優"]
-    notch["瀏海字幕<br/>灰字 volatile → 白字 final"]
-    hub["📝 逐字稿 + 上下文中樞"]
-    polish["逐字稿潤稿<br/>gpt-5.4-mini"]
-    agent["Claude Code agent<br/>claude -p · stream-json · --resume"]
-    ui["問 Sense<br/>主視窗 · feed · chips"]
-    disk[("~/.sense · 本機<br/>notes · transcripts · captures · training")]
-
-    ear --> asr
-    asr --> notch
+    ear["系統音訊"] --> asr["SpeechAnalyzer<br/>雙語"]
+    eye["搖動擷取"] --> hub["逐字稿與情境"]
+    asr --> notch["瀏海字幕"]
     asr --> hub
-    eye --> hub
-    hub --> polish
-    hub --> ui
-    ui <--> agent
-    hub --> agent
-    polish --> disk
+    hub --> polish["整理<br/>gpt-5.4-mini"]
+    hub --> agent["Claude Code<br/>claude -p, --resume"]
+    polish --> disk[("~/.sense")]
     agent --> disk
-
-    classDef device fill:#e6f4ea,stroke:#34a853,color:#0b3d20;
-    classDef cloud fill:#e8f0fe,stroke:#4285f4,color:#0b2a5b;
-    classDef store fill:#fef7e0,stroke:#f9ab00,color:#5b4300;
-    class ear,eye,asr,notch,hub,ui device;
-    class polish,agent cloud;
-    class disk store;
 ```
 
-> 🟩 **on-device** — 感知 + UI；系統音訊不離開你的 Mac。 🟦 **cloud** — 逐字稿潤稿走 OpenAI（你自己的 key），agent 推理走 Anthropic（你自己的 Claude Code 登入）。 🟨 **本機** — 全部落在 `~/.sense`。
+- Apple 的辨識器對每句話輸出兩次：先是持續改寫的草稿，再來是定稿。草稿只用於畫面。
+- 定稿先進佇列。累積 60 字、切換語言或靜默 4 秒，任一條件先到就送去整理。
+- 小模型只做不確定的工作：標點與辨識錯誤。分段、接合批次與去除重複都由一般程式處理。
+- 整理後的逐字稿存到 `~/.sense/transcripts/YYYY-MM-DD.md`。
 
-## 轉錄 pipeline
+## 隱私
 
-```mermaid
-flowchart TD
-    audio["🔊 系統音訊<br/>ScreenCaptureKit · 16 kHz mono"]
-    asr["🍎 Apple 語音辨識 — SpeechAnalyzer<br/>中英兩路同時跑"]
-    router["⚖️ 語言裁判 — LanguageRouter<br/>逐筆定稿信心 EMA + 遲滯，只放行一路"]
-    draft["草稿字（volatile — 還會被改寫）<br/>瀏海灰字 + 視窗淡灰尾，只顯示不落地"]
-    queue["📥 定稿佇列（中灰，這時已看得到字）<br/>出隊：攢滿 60 字 · 語言切換 · 停話 4 秒"]
-    polish["☁️ 清稿 — gpt-5.4-mini<br/>補標點 + 修辨識錯字<br/>這條 pipeline 唯一上雲的一步；失敗原文照用"]
-    post["🔧 確定性後處理<br/>分段 · 接縫接合 · 防抄去重"]
-    white["⚪ 整理完的逐字稿 — 白字"]
-    archive[("~/.sense/transcripts/<br/>YYYY-MM-DD.md")]
-    pairs[("~/.sense/training/polish-pairs.jsonl<br/>原文 → 清稿 語料")]
+| 資料 | 去處 |
+|------|------|
+| 系統音訊 | Mac 上的 SpeechAnalyzer。音訊不會離開 Mac |
+| 麥克風音訊 | 只在 Mac 上，且只在按住按鍵或會議模式開啟時 |
+| 逐字稿文字 | OpenAI `gpt-5.4-mini`，用你自己的金鑰整理 |
+| 你的問題、最近的逐字稿與擷取內容 | Anthropic，透過你自己的 Claude Code 登入 |
+| 筆記與逐字稿封存 | Mac 上的 `~/.sense`，不會上傳 |
 
-    audio --> asr --> router
-    router -->|volatile| draft
-    router -->|final| queue
-    queue --> polish --> post --> white
-    white --> archive
-    polish -.->|原文 ≠ 清稿| pairs
+sense 不內建任何金鑰，也不經過作者的伺服器。
 
-    classDef device fill:#e6f4ea,stroke:#34a853,color:#0b3d20;
-    classDef cloud fill:#e8f0fe,stroke:#4285f4,color:#0b2a5b;
-    classDef store fill:#fef7e0,stroke:#f9ab00,color:#5b4300;
-    class audio,asr,router,draft,queue,post,white device;
-    class polish cloud;
-    class archive,pairs store;
-```
+## 限制
 
-Apple 辨識引擎每段話會吐兩次：先是**草稿（volatile）**——邊聽邊回頭改寫，講完才給**定稿（final）**。草稿只負責顯示——瀏海灰字、視窗淡灰尾巴，不落地。定稿進佇列攢批整理，三個條件先到先觸發：**攢滿 60 字**、**語言切換**、**停話 4 秒**。
+- 需要 macOS 26 以上(SpeechAnalyzer)。
+- 會議模式只從 Mac 的麥克風收你的聲音。
 
-為什麼攢批、不逐筆清？Micro-batching（滿量-或-閒置，跟 Kafka 的 `batch.size` + `linger.ms` 同款）換到三件事：單批上下文更厚（修錯字要靠前後文）、接縫更少（每個接縫都要接合與去重防線）、API 來回更少。而體感代價趨近零——定稿一落地就以灰字上畫面可讀，清稿只是幾秒後把它升級成白字。LLM 只做真正不確定的（標點、辨識錯字）；能確定的（分段、接合、去重）全是程式碼。
+## 其他
 
-## 跑起來（不開 Xcode）
+給 AI agent 的結構化資訊與開發說明在[英文版](README.md#for-ai-agents)。
 
-```bash
-make run       # build + bundle + codesign + open
-make install   # 裝進 /Applications（開機自啟與穩定 TCC 都需要）
-make locales   # dump SpeechTranscriber 支援語言
-make logs      # 即時看 Telemetry（asr / polish / agent / shake）
-```
+## 授權
 
-裝好後選單列會有 Sense 圖示 — 開逐字稿資料夾、縮放 overlay（overlay 聚焦時 ⌘= / ⌘- / ⌘0）、清除對話與畫面逐字稿（或在輸入框打 `/clear`；已歸檔的不動）、權限設定、開機自啟、重啟、結束都在那。overlay 拖頂部標題列移動；輸入框與選取文字支援標準 ⌘C / ⌘V / ⌘X / ⌘A / ⌘Z。從 Finder 拖檔案到 overlay 上會變成附件（Claude Code 以路徑用自己的工具讀）；標題列的釘選鈕可以讓 overlay 不自動收合。
-
-## 分發（給別人）
-
-```bash
-make dmg       # 開發態 app 打成 DMG（對方需「右鍵 → 打開」繞過 Gatekeeper）
-make release   # Developer ID 簽 + Apple 公證 + DMG，對方雙擊即裝
-make publish   # make release + 傳上 GitHub Release（簽名私鑰不出本機）
-```
-
-`release` 一次性前置：Apple Developer Program 簽發 **Developer ID Application** cert、`xcrun notarytool store-credentials sense-notary …` 存公證憑證、`Makefile.local` 設 `DEV_ID_APP`（見 Makefile `release` 註解）。
-
-需求：
-
-- **macOS 26+**（SpeechAnalyzer）
-- **Apple Development cert** — hash 放 `Makefile.local` 的 `SIGN_ID`（gitignored），沒有就 ad-hoc 簽
-- **Claude Code CLI**（`claude`）在 PATH — agent 引擎；用你本機既有的 Claude Code 登入（不需 API key），透過 `zsh -lc` 載入，node/fnm shim 也通。沒有它字幕與逐字稿照常，agent 停用
-- **OpenAI key** 在 Keychain（`service=sense account=openai`）— **只**給逐字稿整理用；沒有 key 字幕與逐字稿照常，整理跳過、原文直出
-- 權限：**螢幕錄製**（系統音訊 + 圈選截圖）、**輔助使用**（shake 的元素探測與點擊攔截），首次啟動會提示；**麥克風**（按住說話 / 會議模式），首次使用時提示
-
-逐字稿整理走 `gpt-5.4-mini` 直打 API（沒 OpenAI key → 原文直出，不整理）。
-
-```bash
-./build/Sense.app/Contents/MacOS/Sense --langs zh-TW,en-US   # 雙路信心擇優（預設）
-./build/Sense.app/Contents/MacOS/Sense --lang ja-JP          # 單語模式
-```
-
-## 隱私 — 資料去哪
-
-sense 是感官 agent，會錄系統音訊、截你圈選的畫面。資料流向講清楚：
-
-| 資料 | 去哪 |
-|---|---|
-| 系統音訊 | **本機** SpeechAnalyzer 即時轉錄，音訊不離開你的 Mac |
-| 麥克風（按住說話 / 會議模式） | **本機**轉錄 — 按住說話只在按住時開 mic；會議模式只在開關打開時錄，逐字稿留在本機 |
-| 逐字稿 | 送 **OpenAI** `gpt-5.4-mini` 整理潤稿 |
-| 你的指令 + 最近逐字稿 + 圈選截圖 | 經 Claude Code 送 **Anthropic** 產生回應 |
-| 筆記 / 逐字稿存檔 | **本機** `~/.sense`，不上傳 |
-
-**OpenAI key（潤稿）與 Claude Code 登入（agent）都是你自己的** — sense 用你 Keychain 裡的 OpenAI key、你 PATH 上的 `claude` CLI 與你既有的 Claude 登入，不內建、不代管、不經過作者的任何伺服器。送什麼出去由你的使用決定，sense 只是把它接起來；逐字稿與筆記只存在你本機的 `~/.sense`。
-
-## 結構
-
-```
-Sources/sense/
-├── App/         main.swift — 接線與啟動
-├── Audio/       ScreenCaptureKit 系統音訊 → PCM
-├── Transcript/  SpeechAnalyzer 轉錄 + store + 小模型整理
-├── Agent/       Claude Code headless（claude -p --output-format stream-json）+ session resume
-├── Overlay/     瀏海字幕 + 主視窗（逐字稿 / feed / chips）
-├── Core/        Telemetry / Keychain / Metrics
-└── Shake/       晃游標圈選（ported from zyx1121/shake）
-```
-
-## 設計依據
-
-`docs/` — [SpeechAnalyzer survey](docs/speechanalyzer-survey.md)、[瀏海 overlay 自刻筆記](docs/macos-notch-overlay.md)、[CLI 開發流程](docs/macos-cli-dev.md)、[分發 checklist](docs/distribution-checklist.md)。
+[MIT](LICENSE)
